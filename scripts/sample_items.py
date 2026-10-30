@@ -58,12 +58,11 @@ def read_tables(dump_path):
             line = line.rstrip("\n")
             if columns is None:
                 if line.startswith("COPY public."):
-                    name, rest = line[len("COPY public."):].split(" (", 1)
+                    name, rest = line[len("COPY public.") :].split(" (", 1)
                     if name in TABLES:
                         table = name
                         columns = [
-                            c.strip().strip('"')
-                            for c in rest.split(") FROM stdin")[0].split(",")
+                            c.strip().strip('"') for c in rest.split(") FROM stdin")[0].split(",")
                         ]
             elif line == "\\.":
                 columns = None
