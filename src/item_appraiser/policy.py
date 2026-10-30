@@ -16,7 +16,7 @@ CONDITION_MULTIPLIERS = {
 # any value above it, like tax brackets, so loan value never drops as value rises.
 # The lower rate on the top slice reflects that expensive items are more rentable
 # and less likely to be bought outright.
-LOAN_THRESHOLD_USD = 75.0
+LOAN_THRESHOLD_USD = 50.0
 LOAN_FRACTION_AT_OR_BELOW = 0.5
 LOAN_FRACTION_ABOVE = 0.25
 

@@ -13,7 +13,7 @@ Everything else comes from a fixed policy in `src/item_appraiser/policy.py`:
 
 - **Buy value** = new price × condition multiplier (new 1.0, like new 0.8,
   anything else 0.6).
-- **Loan value** = half of the first $75 of buy value plus a quarter of
+- **Loan value** = half of the first $50 of buy value plus a quarter of
   anything above that, like tax brackets, so a pricier item never lends for
   less. The lower rate on the top slice reflects that expensive items are more
   rentable and less likely to be bought outright.
