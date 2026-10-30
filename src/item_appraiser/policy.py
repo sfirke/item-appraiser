@@ -12,8 +12,10 @@ CONDITION_MULTIPLIERS = {
     Condition.USED: 0.6,
 }
 
-# A loan is worth half the item's value up to this threshold, a quarter above it:
-# expensive items are more rentable and less likely to be bought outright.
+# A loan is worth half of the item's value up to this threshold plus a quarter of
+# any value above it, like tax brackets, so loan value never drops as value rises.
+# The lower rate on the top slice reflects that expensive items are more rentable
+# and less likely to be bought outright.
 LOAN_THRESHOLD_USD = 75.0
 LOAN_FRACTION_AT_OR_BELOW = 0.5
 LOAN_FRACTION_ABOVE = 0.25
@@ -26,11 +28,9 @@ def buy_value(new_price_usd: float, condition: Condition) -> float:
 
 def loan_value(buy_value_usd: float) -> float:
     """What borrowing the item once is worth to the borrower."""
-    if buy_value_usd <= LOAN_THRESHOLD_USD:
-        fraction = LOAN_FRACTION_AT_OR_BELOW
-    else:
-        fraction = LOAN_FRACTION_ABOVE
-    return round(buy_value_usd * fraction, 2)
+    below = min(buy_value_usd, LOAN_THRESHOLD_USD)
+    above = max(buy_value_usd - LOAN_THRESHOLD_USD, 0)
+    return round(below * LOAN_FRACTION_AT_OR_BELOW + above * LOAN_FRACTION_ABOVE, 2)
 
 
 def appraisal_buy_value(appraisal: Appraisal) -> float:

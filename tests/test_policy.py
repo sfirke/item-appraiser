@@ -14,16 +14,21 @@ def test_buy_value_applies_condition_multiplier(condition, expected):
 
 @pytest.mark.parametrize(
     ("buy", "expected"),
-    [(10, 5), (75, 37.5), (76, 19), (270, 67.5)],
+    [(0, 0), (10, 5), (75, 37.5), (76, 37.75), (270, 86.25)],
 )
-def test_loan_value_is_half_up_to_75_then_a_quarter(buy, expected):
+def test_loan_value_is_half_of_first_75_plus_a_quarter_of_the_rest(buy, expected):
     assert loan_value(buy) == expected
+
+
+def test_loan_value_never_decreases_as_buy_value_rises():
+    values = [loan_value(cents / 100) for cents in range(0, 50_000, 25)]
+    assert values == sorted(values)
 
 
 def test_appraisal_values_chain_through_policy():
     appraisal = Appraisal(new_price_usd=170, condition=Condition.USED)
     assert appraisal_buy_value(appraisal) == 102
-    assert appraisal_loan_value(appraisal) == 25.5
+    assert appraisal_loan_value(appraisal) == 44.25
 
 
 @pytest.mark.parametrize(

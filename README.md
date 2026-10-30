@@ -13,8 +13,10 @@ Everything else comes from a fixed policy in `src/item_appraiser/policy.py`:
 
 - **Buy value** = new price × condition multiplier (new 1.0, like new 0.8,
   anything else 0.6).
-- **Loan value** = half the buy value up to $75, a quarter above that, since
-  expensive items are more rentable and less likely to be bought outright.
+- **Loan value** = half of the first $75 of buy value plus a quarter of
+  anything above that, like tax brackets, so a pricier item never lends for
+  less. The lower rate on the top slice reflects that expensive items are more
+  rentable and less likely to be bought outright.
 
 Keeping the policy out of the appraiser means it can change without
 re-appraising anything.
@@ -65,5 +67,5 @@ condition accuracy, and lists the largest disagreements to review by hand.
 
 The only appraiser so far is `category-median`, a baseline that guesses the
 median new price of other items in the same category (scored leave-one-out).
-On the 50-item set its typical error is about 2.3x, and its total buy value
-comes out at 0.55x the hand total. Any real appraiser needs to beat that.
+On the 50-item set its typical buy-value error is about 2.3x, and its total
+buy value comes out at 0.55x the hand total. Any real appraiser needs to beat that.
