@@ -68,9 +68,7 @@ class Appraisal:
     new_price_usd: float
     condition: Condition
     confidence: Confidence | None = None
-    new_price_low_usd: float | None = None
-    new_price_high_usd: float | None = None
-    assumptions: str = ""
+    assumptions: str = ""  # one short sentence, e.g. "priced as a set of 4 rackets"
     method: str = ""
     model_version: str = ""
     estimated_at: datetime | None = None
