@@ -218,3 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Sampled Meutch listings are real member content; keep them out of the public repo
+data/
