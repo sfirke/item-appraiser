@@ -38,6 +38,18 @@ class Confidence(StrEnum):
         return None
 
 
+class ResaleDemand(StrEnum):
+    """Whether this kind of item holds its value secondhand; the value policy decides how much."""
+
+    TYPICAL = "typical"
+    WEAK = "weak"
+
+    @classmethod
+    def parse(cls, text: str | None) -> "ResaleDemand":
+        """Read a hand-entered value; anything but "weak", including blank, is TYPICAL."""
+        return cls.WEAK if (text or "").strip().lower() == cls.WEAK else cls.TYPICAL
+
+
 class ListingType(StrEnum):
     GIVEAWAY = "giveaway"
     LOAN = "loan"
@@ -60,19 +72,24 @@ class Listing:
 class Appraisal:
     """An appraiser's estimate for one listing.
 
-    Appraisers estimate only the new price and condition; buy and loan values are
-    derived from these by the value policy (see `item_appraiser.policy`), so the
-    policy can change without re-appraising anything.
+    Appraisers estimate only the new price, condition and resale demand; buy and
+    loan values are derived from these by the value policy (see
+    `item_appraiser.policy`), so the policy can change without re-appraising anything.
     """
 
     new_price_usd: float
     condition: Condition
+    resale_demand: ResaleDemand = ResaleDemand.TYPICAL
     confidence: Confidence | None = None
     assumptions: str = ""  # one short sentence, e.g. "priced as a set of 4 rackets"
     method: str = ""
     model_version: str = ""
     estimated_at: datetime | None = None
     currency: str = "USD"
+    # How the new price was reached, when the appraiser counted units. Scored in
+    # evaluation only; Meutch stores just the total.
+    quantity: int | None = None
+    unit_new_price_usd: float | None = None
 
 
 class Appraiser(Protocol):

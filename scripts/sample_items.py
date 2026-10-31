@@ -23,11 +23,22 @@ ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "\\": "\\"}
 
 # Left blank by this script; filled in by hand.
 VALUE_COLUMNS = [
+    "quantity",
     "new_price_usd",
     "used_value_usd",
     "condition",
+    "resale_demand",
+    "multiplier",
     "confidence",
-    "notes",
+    "buy_value_low",
+    "buy_value_exact",
+    "buy_value_high",
+    "loan_value_exact",
+    "method",
+    "model_version",
+    "estimated_at",
+    "currency",
+    "assumptions",
 ]
 
 
@@ -111,6 +122,13 @@ def main():
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("-n", type=int, default=DEFAULT_N)
     parser.add_argument(
+        "--exclude",
+        type=Path,
+        action="append",
+        default=[],
+        help="CSV whose item_ids must not be drawn (repeatable); for a held-out set",
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="overwrite an existing output file (discards hand-entered values)",
@@ -121,6 +139,11 @@ def main():
         sys.exit(f"{args.out} already exists; pass --force to overwrite it.")
 
     rows = build_rows(read_tables(args.dump))
+    excluded = set()
+    for path in args.exclude:
+        with open(path, newline="", encoding="utf-8") as f:
+            excluded.update(r["item_id"] for r in csv.DictReader(f))
+    rows = [r for r in rows if r["item_id"] not in excluded]
     sample = random.Random(args.seed).sample(rows, args.n)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)

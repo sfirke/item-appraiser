@@ -1,6 +1,6 @@
 import pytest
 
-from item_appraiser.models import Appraisal, Condition
+from item_appraiser.models import Appraisal, Condition, ResaleDemand
 from item_appraiser.policy import appraisal_buy_value, appraisal_loan_value, buy_value, loan_value
 
 
@@ -10,6 +10,15 @@ from item_appraiser.policy import appraisal_buy_value, appraisal_loan_value, buy
 )
 def test_buy_value_applies_condition_multiplier(condition, expected):
     assert buy_value(100, condition) == expected
+
+
+@pytest.mark.parametrize(
+    ("condition", "expected"),
+    [(Condition.NEW, 100), (Condition.LIKE_NEW, 40), (Condition.USED, 25)],
+)
+def test_weak_resale_demand_lowers_used_values_only(condition, expected):
+    assert buy_value(100, condition, ResaleDemand.WEAK) == expected
+    assert appraisal_buy_value(Appraisal(100, condition, ResaleDemand.WEAK)) == expected
 
 
 @pytest.mark.parametrize(
