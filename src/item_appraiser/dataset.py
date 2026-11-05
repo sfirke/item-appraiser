@@ -4,7 +4,14 @@ import csv
 from dataclasses import dataclass
 from pathlib import Path
 
-from item_appraiser.models import Appraisal, Condition, Confidence, Listing, ListingType
+from item_appraiser.models import (
+    Appraisal,
+    Condition,
+    Confidence,
+    Listing,
+    ListingType,
+    ResaleDemand,
+)
 
 DEFAULT_PATH = Path("data/items_sample.csv")
 
@@ -33,9 +40,12 @@ def parse_row(row: dict[str, str]) -> LabeledItem | None:
         listing_type=ListingType(row.get("listing_type") or "loan"),
         image_urls=_split(row.get("image_urls") or "", " "),
     )
+    quantity = (row.get("quantity") or "").strip()
     label = Appraisal(
         new_price_usd=float(new_price),
+        quantity=int(float(quantity)) if quantity else None,
         condition=Condition.parse(row.get("condition")),
+        resale_demand=ResaleDemand.parse(row.get("resale_demand")),
         confidence=Confidence.parse(row.get("confidence")),
         assumptions=row.get("assumptions") or "",
         method=row.get("method") or "hand",

@@ -1,5 +1,5 @@
-item_id,name,description,category,tags,listing_type,listed_on,image_urls,new_price_usd,used_value_usd,condition,multiplier,confidence,buy_value_low,buy_value_exact,buy_value_high,loan_value_exact,method,model_version,estimated_at,currency,assumptions
-a1,Cordless drill,"18V, two batteries",Tools & Hardware,drill | power tools,loan,2026-01-01,https://example.com/a.jpg https://example.com/b.jpg,150,,,0.6,high,,90,,35,hand,Sam,2026-10-12,,
-a2,Hammer,,Tools & Hardware,,loan,2026-01-02,,20,,like new,0.8,med,,16,,8,hand,Sam,2026-10-12,,
-a3,Board game,Unopened,Toys & Games,boardgame,giveaway,2026-01-03,,40,,new,1,low,,40,,20,hand,Sam,2026-10-12,USD,
-a4,Not yet valued,,Toys & Games,,giveaway,2026-01-04,,,,,,,,,,,,,,,
+item_id,name,description,category,tags,listing_type,listed_on,image_urls,quantity,new_price_usd,used_value_usd,condition,multiplier,confidence,buy_value_low,buy_value_exact,buy_value_high,loan_value_exact,method,model_version,estimated_at,currency,assumptions,resale_demand
+a1,Cordless drill,"18V, two batteries",Tools & Hardware,drill | power tools,loan,2026-01-01,https://example.com/a.jpg https://example.com/b.jpg,1,150,,,0.6,high,,90,,35,hand,Sam,2026-10-12,,,
+a2,Hammer,,Tools & Hardware,,loan,2026-01-02,,,20,,like new,0.8,med,,16,,8,hand,Sam,2026-10-12,,,
+a3,Board game,Unopened,Toys & Games,boardgame,giveaway,2026-01-03,,2,40,,new,1,low,,40,,20,hand,Sam,2026-10-12,USD,,weak
+a4,Not yet valued,,Toys & Games,,giveaway,2026-01-04,,,,,,,,,,,,,,,,,
