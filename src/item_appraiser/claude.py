@@ -9,8 +9,11 @@ listing text, with structured JSON back. With a `cache_dir`, every usable
 response is stored on disk, so appraising the same listing again costs nothing.
 """
 
+import ipaddress
 import json
+import socket
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -23,7 +26,8 @@ except ImportError:  # the core package works without it; only this appraiser ne
     anthropic = None
 
 from item_appraiser import prompt
-from item_appraiser.cache import ResponseCache
+from item_appraiser._version import __version__
+from item_appraiser.cache import ResponseCache, digest
 from item_appraiser.models import MONEY_ONLY, Appraisal, AppraisalError, Impact, Listing
 
 HAIKU = "claude-haiku-5-5"
@@ -59,13 +63,55 @@ ESTIMATED_TOKENS_PER_IMAGE = 650  # the largest photos in the test set come to a
 ESTIMATED_OUTPUT_TOKENS = 400  # the JSON plus low-effort thinking
 
 
-def image_is_reachable(url: str) -> bool:
-    """The API fetches photo URLs itself and fails the whole request on a dead one."""
-    request = urllib.request.Request(url, method="HEAD")
+IMAGE_CHECK_TIMEOUT_SECONDS = 10
+USER_AGENT = f"item-appraiser/{__version__} (+https://github.com/sfirke/item-appraiser)"
+
+
+def is_public_url(url: str) -> bool:
+    """Whether `url` is http(s) on a host that resolves only to public addresses.
+
+    The API fetches photos from Anthropic's servers, so a localhost or private-network
+    URL (a dev server, an internal bucket) can never work and would fail the request.
+    """
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return False
     try:
-        with urllib.request.urlopen(request, timeout=10) as response:
-            return response.status == 200
-    except (urllib.error.URLError, TimeoutError):
+        addresses = socket.getaddrinfo(parsed.hostname, parsed.port or None)
+    except (OSError, UnicodeError, ValueError):
+        return False
+    return bool(addresses) and all(
+        ipaddress.ip_address(address[4][0].split("%")[0]).is_global for address in addresses
+    )
+
+
+def _fetch_ok(url: str, method: str) -> bool:
+    headers = {"User-Agent": USER_AGENT}
+    if method == "GET":
+        headers["Range"] = "bytes=0-0"  # just enough to confirm the file is there
+    request = urllib.request.Request(url, method=method, headers=headers)
+    with urllib.request.urlopen(request, timeout=IMAGE_CHECK_TIMEOUT_SECONDS) as response:
+        return 200 <= response.status < 300
+
+
+def image_is_reachable(url: str) -> bool:
+    """The API fetches photo URLs itself and fails the whole request on a dead one.
+
+    Checks that the URL is public, then sends a HEAD request, falling back to a
+    one-byte GET for servers that don't allow HEAD.
+    """
+    if not is_public_url(url):
+        return False
+    try:
+        return _fetch_ok(url, "HEAD")
+    except urllib.error.HTTPError as e:
+        if e.code not in (403, 405, 501):  # some servers and signed URLs refuse only HEAD
+            return False
+    except (OSError, ValueError):
+        return False
+    try:
+        return _fetch_ok(url, "GET")
+    except (OSError, ValueError):
         return False
 
 
@@ -98,9 +144,10 @@ class ClaudeAppraiser:
     `appraise()` raises AppraisalError when the model gives no usable answer for a
     listing, or the API rejects or fails that one request; other listings may
     still succeed. Authentication and permission errors propagate unchanged.
-    """
 
-    method = "claude"
+    Any Claude model works. Costs are tracked for the models in `PRICES`; for
+    another model, pass its `price` or go without cost tracking.
+    """
 
     def __init__(
         self,
@@ -111,14 +158,14 @@ class ClaudeAppraiser:
         client: "anthropic.Anthropic | None" = None,
         image_check: Callable[[str], bool] | None = None,
         impacts: Iterable[Impact | str] = MONEY_ONLY,
+        price: Price | None = None,
     ):
-        if model not in PRICES:
-            raise ValueError(f"no pricing for model {model}; known models: {', '.join(PRICES)}")
         if client is None and anthropic is None:
             raise ImportError(
                 "ClaudeAppraiser needs the anthropic package: pip install 'item-appraiser[claude]'"
             )
         self.model = model
+        self.price = price or PRICES.get(model)  # None: costs aren't tracked
         self.use_images = use_images
         self.use_quantity = use_quantity
         self.impacts = prompt.normalize_impacts(impacts)
@@ -129,7 +176,8 @@ class ClaudeAppraiser:
         )
         if Impact.CLIMATE in self.impacts:
             self.model_version += f"+co2-{prompt.FOOTPRINT_VERSION}"
-        self.spent_usd = 0.0  # what this object paid for, including unusable responses
+        # What this object paid for, including unusable responses; stays 0 without a price.
+        self.spent_usd = 0.0
         self._client = client
         self._image_check = image_check or image_is_reachable
         self._system = prompt.system_prompt(use_quantity, self.impacts)
@@ -163,6 +211,20 @@ class ClaudeAppraiser:
             key["footprint_version"] = prompt.FOOTPRINT_VERSION
         return key
 
+    def fingerprint(self, listing: Listing) -> str:
+        """Identifies everything a fresh appraisal of `listing` would depend on.
+
+        The same value is stored on each `Appraisal`; when they differ, the listing
+        (name, description, photos) or the appraiser's model or prompt has changed
+        since it was estimated.
+        """
+        return digest(self._cache_key(listing))
+
+    def _require_price(self) -> Price:
+        if self.price is None:
+            raise ValueError(f"no pricing for model {self.model}; pass price= to track costs")
+        return self.price
+
     def uncached(self, listings: Iterable[Listing]) -> list[Listing]:
         """The listings that would need an API call (all of them, without a cache)."""
         if self.cache is None:
@@ -171,7 +233,7 @@ class ClaudeAppraiser:
 
     def estimate_cost(self, listings: Iterable[Listing]) -> float:
         """Upper-end USD estimate for calling the API on `listings`, ignoring prompt caching."""
-        price = PRICES[self.model]
+        price = self._require_price()
         prompt_chars = len(self._system) + len(json.dumps(self._schema))
         total = 0.0
         for listing in listings:
@@ -183,13 +245,14 @@ class ClaudeAppraiser:
 
     def stored_cost(self, listings: Iterable[Listing]) -> float:
         """What the cached responses for `listings` cost when they were made."""
+        price = self._require_price()
         if self.cache is None:
             return 0.0
         total = 0.0
         for listing in listings:
             record = self.cache.get(self._cache_key(listing))
             if record is not None:
-                total += usage_cost(record["response"].get("usage", {}), PRICES[self.model])
+                total += usage_cost(record["response"].get("usage", {}), price)
         return total
 
     def _request(self, listing: Listing, urls: tuple[str, ...]) -> dict:
@@ -233,7 +296,8 @@ class ClaudeAppraiser:
         except retryable as e:
             raise AppraisalError(f"API error: {e}") from e
         response = message.model_dump(mode="json")
-        self.spent_usd += usage_cost(response.get("usage", {}), PRICES[self.model])
+        if self.price is not None:
+            self.spent_usd += usage_cost(response.get("usage", {}), self.price)
         return {
             "model_version": self.model_version,
             "created_at": datetime.now(UTC).isoformat(),
@@ -242,7 +306,7 @@ class ClaudeAppraiser:
             "response": response,
         }
 
-    def _parse(self, record: dict) -> Appraisal:
+    def _parse(self, record: dict, fingerprint: str) -> Appraisal:
         response = record["response"]
         if response.get("stop_reason") != "end_turn":
             raise AppraisalError(f"stopped early: {response.get('stop_reason')}")
@@ -251,19 +315,21 @@ class ClaudeAppraiser:
                 json.loads(response_text(response)),
                 self.use_quantity,
                 self.impacts,
-                method=self.method,
                 model_version=record["model_version"],
                 estimated_at=datetime.fromisoformat(record["created_at"]),
+                fingerprint=fingerprint,
             )
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
             raise AppraisalError(f"unusable output: {e!r}") from e
 
     def appraise(self, listing: Listing) -> Appraisal:
         key = self._cache_key(listing)
+        fingerprint = digest(key)
         if self.cache is not None and (record := self.cache.get(key)) is not None:
-            return self._parse(record)
+            return self._parse(record, fingerprint)
         record = self._call_api(listing)
-        appraisal = self._parse(record)  # only usable responses are stored; failures retry
+        # Only usable responses are stored, so failures are retried next time.
+        appraisal = self._parse(record, fingerprint)
         if self.cache is not None:
             self.cache.put(key, record)
         return appraisal

@@ -24,3 +24,12 @@ def test_med_confidence_reads_as_medium():
     hammer = dataset.load(FIXTURE)[1]
     assert hammer.label.confidence == Confidence.MEDIUM
     assert hammer.label.condition == Condition.LIKE_NEW
+
+
+def test_labels_read_the_assumption_and_default_to_hand():
+    row = {"name": "Rake", "new_price_usd": "25", "assumptions": "Priced as a leaf rake."}
+    label = dataset.parse_row(row).label
+    assert label.assumption == "Priced as a leaf rake."
+    assert label.model_version == "hand"
+    row = {"name": "Rake", "new_price_usd": "25", "assumption": "Singular column."}
+    assert dataset.parse_row(row).label.assumption == "Singular column."

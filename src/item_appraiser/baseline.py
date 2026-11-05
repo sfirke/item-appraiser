@@ -16,7 +16,6 @@ class CategoryMedianAppraiser:
     categories, and always guesses USED, the most common condition.
     """
 
-    method = "baseline"
     model_version = "category-median"
 
     def __init__(self, training: Iterable[LabeledItem], categories: Mapping[str, str]):
@@ -36,6 +35,5 @@ class CategoryMedianAppraiser:
         return Appraisal(
             new_price_usd=self.by_category.get(category, self.overall),
             condition=Condition.USED,
-            method=self.method,
             model_version=self.model_version,
         )

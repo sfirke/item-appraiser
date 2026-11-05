@@ -29,18 +29,24 @@ dependencies = []
 
 [project.optional-dependencies]
 claude = ["anthropic>=2.3"]
-dev = ["item-appraiser[claude]", "python-dotenv", "pytest", "ruff", "build", "twine"]
+
+# Local-only tooling; not published as an extra. Install with:
+#   pip install -e '.[claude]' --group dev
+[dependency-groups]
+dev = ["python-dotenv", "pytest", "ruff", "build", "twine"]
 
 [project.urls]
 Homepage = "https://github.com/sfirke/item-appraiser"
+Repository = "https://github.com/sfirke/item-appraiser"
 Issues = "https://github.com/sfirke/item-appraiser/issues"
+Changelog = "https://github.com/sfirke/item-appraiser/blob/main/CHANGELOG.md"
 
 [project.scripts]
 item-appraiser-eval = "item_appraiser.evaluate:main"
 
 # List what ships explicitly, so local files (.env, data/, caches) never reach PyPI.
 [tool.hatch.build.targets.sdist]
-only-include = ["src", "tests", "README.md", "LICENSE", "pyproject.toml"]
+only-include = ["src", "tests", "README.md", "CHANGELOG.md", "LICENSE", "pyproject.toml"]
 
 [tool.ruff]
 target-version = "py311"

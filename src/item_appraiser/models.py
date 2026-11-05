@@ -1,5 +1,6 @@
 """Data types shared by appraisers, the value policy, and the evaluation harness."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass, fields
 from datetime import datetime
 from enum import StrEnum
@@ -145,11 +146,10 @@ class Appraisal:
     condition: Condition
     resale_demand: ResaleDemand = ResaleDemand.TYPICAL
     confidence: Confidence | None = None
-    assumptions: str = ""  # one short sentence, e.g. "priced as a set of 4 rackets"
-    method: str = ""
+    assumption: str = ""  # one short sentence, e.g. "priced as a set of 4 rackets"
+    # What produced the estimate, e.g. "claude-sonnet-5-5/p4+img+qty" or "hand".
     model_version: str = ""
     estimated_at: datetime | None = None
-    currency: str = "USD"
     # How the new price was reached, when the appraiser counted units.
     quantity: int | None = None
     unit_new_price_usd: float | None = None
@@ -157,6 +157,9 @@ class Appraisal:
     footprint_category: FootprintCategory | None = None
     # What the appraisal was requested for; decides which derived values to_dict() reports.
     impacts: frozenset[Impact] = MONEY_ONLY
+    # Identifies the listing and settings this was estimated from; compare it with
+    # the appraiser's `fingerprint(listing)` to tell whether it needs redoing.
+    fingerprint: str = ""
 
     @property
     def buy_value_usd(self) -> float:
@@ -214,6 +217,32 @@ class Appraisal:
             result["giveaway_kg_co2e"] = self.giveaway_kg_co2e
             result["loan_kg_co2e"] = self.loan_kg_co2e
         return result
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "Appraisal":
+        """Rebuild an appraisal from `to_dict()` output.
+
+        The derived values (buy and loan, kg CO2e) and any other keys that aren't
+        fields are ignored, so they always come from the current policies.
+        """
+        known = {field.name for field in fields(cls)}
+        values = {key: value for key, value in data.items() if key in known}
+        values["condition"] = Condition(values["condition"])
+        if values.get("resale_demand") is not None:
+            values["resale_demand"] = ResaleDemand(values["resale_demand"])
+        else:
+            values.pop("resale_demand", None)
+        if values.get("confidence") is not None:
+            values["confidence"] = Confidence(values["confidence"])
+        if values.get("footprint_category") is not None:
+            values["footprint_category"] = FootprintCategory(values["footprint_category"])
+        if values.get("impacts") is not None:
+            values["impacts"] = frozenset(Impact(impact) for impact in values["impacts"])
+        else:
+            values.pop("impacts", None)
+        if isinstance(values.get("estimated_at"), str):
+            values["estimated_at"] = datetime.fromisoformat(values["estimated_at"])
+        return cls(**values)
 
 
 class AppraisalError(Exception):

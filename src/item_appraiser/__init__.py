@@ -12,6 +12,7 @@ Typical use, with the `claude` extra installed and ANTHROPIC_API_KEY set::
     appraisal.new_item_kg_co2e, appraisal.giveaway_kg_co2e, appraisal.loan_kg_co2e
 """
 
+from item_appraiser._version import __version__
 from item_appraiser.claude import ClaudeAppraiser
 from item_appraiser.climate import giveaway_kg_co2e, loan_kg_co2e, new_item_kg_co2e
 from item_appraiser.models import (
@@ -28,6 +29,7 @@ from item_appraiser.models import (
 from item_appraiser.policy import buy_value, loan_value
 
 __all__ = [
+    "__version__",
     "Appraisal",
     "AppraisalError",
     "Appraiser",

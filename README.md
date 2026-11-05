@@ -60,15 +60,50 @@ emission factors are per dollar; `impacts` decides which derived values
 `to_dict()` reports. Money only, the default, sends exactly the tested prompt.
 
 An `Appraisal` also carries the condition, resale demand, the model's confidence,
-a one-sentence assumption a reviewer can check ("Priced as a DeWalt 20V MAX drill
+a one-sentence `assumption` a reviewer can check ("Priced as a DeWalt 20V MAX drill
 kit with two batteries..."), the quantity and unit price where the model counted
-units, and a `model_version` string such as `claude-sonnet-5-5/p4+img+qty` that
-identifies the model, prompt version and settings.
+units, a `model_version` string such as `claude-sonnet-5-5/p4+img+qty` that
+identifies the model, prompt version and settings, and a `fingerprint`.
+
+`to_dict()` gives these keys: `new_price_usd`, `condition`, `resale_demand`,
+`confidence`, `assumption`, `model_version`, `estimated_at` (ISO 8601),
+`quantity`, `unit_new_price_usd`, `footprint_category` (null without climate),
+`impacts` (a sorted list such as `["climate", "money"]`) and `fingerprint`, plus
+the derived values for the requested impacts: `buy_value_usd` and
+`loan_value_usd` for money, `new_item_kg_co2e`, `giveaway_kg_co2e` and
+`loan_kg_co2e` for climate.
+
+
+### Storing appraisals and keeping them current
+
+Store `to_dict()` (as columns or a JSON column) and rebuild with
+`Appraisal.from_dict()`, which ignores the stored derived values (buy and loan
+values, kg CO2e) so they always come from the current policies.
+
+The `fingerprint` identifies everything the estimate depended on: the listing's
+name, description and photo URLs, and the model, prompt, impacts and settings. To find
+listings that need appraising again, after an owner edits them or after an
+upgrade changes the prompt, compare it with what the appraiser would use now:
+
+```python
+if stored.fingerprint != appraiser.fingerprint(listing):
+    stored = appraiser.appraise(listing)
+```
+
+Each call can take several seconds, so appraise from a background job or
+scheduled command rather than inside a web request, and pass a client with a
+timeout that suits it (the Anthropic SDK's default is 10 minutes):
+
+```python
+appraiser = ClaudeAppraiser(client=anthropic.Anthropic(timeout=60, max_retries=2))
+```
 
 `ClaudeAppraiser` options:
 
-- `model`: defaults to Sonnet, the tested setting. `item_appraiser.claude.HAIKU`
-  and `OPUS` are also priced.
+- `model`: defaults to Sonnet, the tested setting. Any Claude model ID works;
+  `item_appraiser.claude.HAIKU`, `SONNET` and `OPUS` have prices built in, so
+  their costs are tracked. For another model, pass
+  `price=item_appraiser.claude.Price(...)` to track costs, or go without.
 - `cache_dir`: store every usable response on disk, so appraising the same
   listing again (same text, photos, model and prompt) costs nothing and needs no
   API key. Off by default.
@@ -80,9 +115,15 @@ identifies the model, prompt version and settings.
 
 Each call costs about $0.003 with Sonnet. `appraiser.spent_usd` totals what an
 appraiser has spent, and `appraiser.estimate_cost(listings)` gives an upper-end
-estimate before running a batch. Photo URLs that don't load are left out of the
-request rather than failing it. Authentication errors propagate as Anthropic SDK
+estimate before running a batch. Authentication errors propagate as Anthropic SDK
 exceptions.
+
+The API fetches photos from Anthropic's servers and fails the whole request if one
+won't load, so each URL is checked first and left out of the request (rather than
+failing it) unless it is http(s) on a public address and answers a HEAD request,
+or a one-byte GET where HEAD is refused. So `localhost` photos from a development
+server are skipped and the listing is appraised from its text. Pass
+`image_check=` to replace the check, or `use_images=False` to send no photos.
 
 
 ## How values are derived
@@ -188,12 +229,25 @@ run against the hand-valued sets before its values are trusted.
 
 ```sh
 python3 -m venv .venv
-.venv/bin/pip install -e '.[dev]'
+.venv/bin/pip install -e '.[claude]' --group dev   # needs pip 25.1 or later
 .venv/bin/pytest
 ```
 
-To release: bump `version` in `pyproject.toml`, then
-`.venv/bin/python -m build && .venv/bin/twine upload dist/*`.
+CI runs the tests on Python 3.11 to 3.14, checks the core works without the
+`claude` extra, and checks the built package.
+
+To release: bump `version` in `pyproject.toml` and date the entry in
+`CHANGELOG.md`, merge to `main`, then tag and push:
+
+```sh
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+The `Publish` workflow builds the package and uploads it to PyPI with Trusted
+Publishing. Before the first release, add a pending publisher on PyPI (project
+`item-appraiser`, owner `sfirke`, repository `item-appraiser`, workflow
+`publish.yml`, environment `pypi`) and create a `pypi` environment in the
+GitHub repository settings.
 
 
 ## Test data
