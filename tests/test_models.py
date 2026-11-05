@@ -4,7 +4,15 @@ from datetime import UTC, datetime
 import pytest
 
 import item_appraiser
-from item_appraiser import Appraisal, Condition, Confidence, Listing, ResaleDemand
+from item_appraiser import (
+    Appraisal,
+    Condition,
+    Confidence,
+    FootprintCategory,
+    Impact,
+    Listing,
+    ResaleDemand,
+)
 
 
 def test_listing_accepts_a_list_of_urls_and_stays_hashable():
@@ -42,6 +50,26 @@ def test_to_dict_is_json_ready_and_includes_derived_values():
     assert data["estimated_at"] == "2026-11-04T00:00:00+00:00"
     assert data["buy_value_usd"] == 32
     assert data["loan_value_usd"] == 16
+
+
+def test_to_dict_reports_only_the_requested_impacts():
+    both = Appraisal(
+        100,
+        Condition.NEW,
+        footprint_category=FootprintCategory.TOYS_AND_GAMES,
+        impacts=frozenset({Impact.MONEY, Impact.CLIMATE}),
+    )
+    data = json.loads(json.dumps(both.to_dict()))
+    assert data["impacts"] == ["climate", "money"]
+    assert data["footprint_category"] == "toys and games"
+    assert data["buy_value_usd"] == 100
+    assert data["new_item_kg_co2e"] == both.new_item_kg_co2e > 0
+    assert data["giveaway_kg_co2e"] == both.giveaway_kg_co2e
+    assert data["loan_kg_co2e"] == both.loan_kg_co2e
+
+    money = Appraisal(100, Condition.NEW).to_dict()
+    assert money["impacts"] == ["money"]
+    assert "new_item_kg_co2e" not in money
 
 
 def test_public_api_is_importable_from_the_package_root():

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Draw a seeded random sample of Meutch items into a CSV for hand valuation.
+"""Draw a seeded random sample of listings from a database dump into a CSV for hand valuation.
 
 Reads the plain-SQL pg_dump directly (no database needed) and writes one row
 per sampled item, with blank columns to fill in by hand.
@@ -8,12 +8,14 @@ per sampled item, with blank columns to fill in by hand.
 import argparse
 import csv
 import gzip
+import os
 import random
 import sys
 from collections import defaultdict
 from pathlib import Path
 
-DEFAULT_DUMP = Path.home() / "git/meutch-db-backups/db_backup.sql.gz"
+# Where the gzipped pg_dump lives on this machine; --dump overrides it.
+DUMP_ENV_VAR = "ITEM_APPRAISER_DUMP"
 DEFAULT_OUT = Path(__file__).resolve().parent.parent / "data/items_sample.csv"
 DEFAULT_SEED = 20261012
 DEFAULT_N = 50
@@ -117,7 +119,14 @@ def build_rows(tables):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dump", type=Path, default=DEFAULT_DUMP)
+    default_dump = os.environ.get(DUMP_ENV_VAR)
+    parser.add_argument(
+        "--dump",
+        type=Path,
+        default=Path(default_dump) if default_dump else None,
+        required=not default_dump,
+        help=f"gzipped plain-SQL pg_dump (default: ${DUMP_ENV_VAR})",
+    )
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("-n", type=int, default=DEFAULT_N)
