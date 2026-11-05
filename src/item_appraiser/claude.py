@@ -21,7 +21,7 @@ except ImportError:  # the core package works without it; only this appraiser ne
     anthropic = None
 
 from item_appraiser import prompt
-from item_appraiser.cache import ResponseCache
+from item_appraiser.cache import ResponseCache, digest
 from item_appraiser.images import image_is_reachable
 from item_appraiser.models import MONEY_ONLY, Appraisal, AppraisalError, Impact, Listing
 
@@ -87,9 +87,10 @@ class ClaudeAppraiser:
     `appraise()` raises AppraisalError when the model gives no usable answer for a
     listing, or the API rejects or fails that one request; other listings may
     still succeed. Authentication and permission errors propagate unchanged.
-    """
 
-    method = "claude"
+    Any Claude model works. Costs are tracked for the models in `PRICES`; for
+    another model, pass its `price` or go without cost tracking.
+    """
 
     def __init__(
         self,
@@ -100,14 +101,14 @@ class ClaudeAppraiser:
         client: "anthropic.Anthropic | None" = None,
         image_check: Callable[[str], bool] | None = None,
         impacts: Iterable[Impact | str] = MONEY_ONLY,
+        price: Price | None = None,
     ):
-        if model not in PRICES:
-            raise ValueError(f"no pricing for model {model}; known models: {', '.join(PRICES)}")
         if client is None and anthropic is None:
             raise ImportError(
                 "ClaudeAppraiser needs the anthropic package: pip install 'item-appraiser[claude]'"
             )
         self.model = model
+        self.price = price or PRICES.get(model)  # None: costs aren't tracked
         self.use_images = use_images
         self.use_quantity = use_quantity
         self.impacts = prompt.normalize_impacts(impacts)
@@ -118,7 +119,8 @@ class ClaudeAppraiser:
         )
         if Impact.CLIMATE in self.impacts:
             self.model_version += f"+co2-{prompt.FOOTPRINT_VERSION}"
-        self.spent_usd = 0.0  # what this object paid for, including unusable responses
+        # What this object paid for, including unusable responses; stays 0 without a price.
+        self.spent_usd = 0.0
         self._client = client
         self._image_check = image_check or image_is_reachable
         self._system = prompt.system_prompt(use_quantity, self.impacts)
@@ -152,6 +154,20 @@ class ClaudeAppraiser:
             key["footprint_version"] = prompt.FOOTPRINT_VERSION
         return key
 
+    def fingerprint(self, listing: Listing) -> str:
+        """Identifies everything a fresh appraisal of `listing` would depend on.
+
+        The same value is stored on each `Appraisal`; when they differ, the listing
+        (name, description, photos) or the appraiser's model or prompt has changed
+        since it was estimated.
+        """
+        return digest(self._cache_key(listing))
+
+    def _require_price(self) -> Price:
+        if self.price is None:
+            raise ValueError(f"no pricing for model {self.model}; pass price= to track costs")
+        return self.price
+
     def uncached(self, listings: Iterable[Listing]) -> list[Listing]:
         """The listings that would need an API call (all of them, without a cache)."""
         if self.cache is None:
@@ -160,7 +176,7 @@ class ClaudeAppraiser:
 
     def estimate_cost(self, listings: Iterable[Listing]) -> float:
         """Upper-end USD estimate for calling the API on `listings`, ignoring prompt caching."""
-        price = PRICES[self.model]
+        price = self._require_price()
         prompt_chars = len(self._system) + len(json.dumps(self._schema))
         total = 0.0
         for listing in listings:
@@ -172,13 +188,14 @@ class ClaudeAppraiser:
 
     def stored_cost(self, listings: Iterable[Listing]) -> float:
         """What the cached responses for `listings` cost when they were made."""
+        price = self._require_price()
         if self.cache is None:
             return 0.0
         total = 0.0
         for listing in listings:
             record = self.cache.get(self._cache_key(listing))
             if record is not None:
-                total += usage_cost(record["response"].get("usage", {}), PRICES[self.model])
+                total += usage_cost(record["response"].get("usage", {}), price)
         return total
 
     def _request(self, listing: Listing, urls: tuple[str, ...]) -> dict:
@@ -222,7 +239,8 @@ class ClaudeAppraiser:
         except retryable as e:
             raise AppraisalError(f"API error: {e}") from e
         response = message.model_dump(mode="json")
-        self.spent_usd += usage_cost(response.get("usage", {}), PRICES[self.model])
+        if self.price is not None:
+            self.spent_usd += usage_cost(response.get("usage", {}), self.price)
         return {
             "model_version": self.model_version,
             "created_at": datetime.now(UTC).isoformat(),
@@ -231,7 +249,7 @@ class ClaudeAppraiser:
             "response": response,
         }
 
-    def _parse(self, record: dict) -> Appraisal:
+    def _parse(self, record: dict, fingerprint: str) -> Appraisal:
         response = record["response"]
         if response.get("stop_reason") != "end_turn":
             raise AppraisalError(f"stopped early: {response.get('stop_reason')}")
@@ -240,19 +258,21 @@ class ClaudeAppraiser:
                 json.loads(response_text(response)),
                 self.use_quantity,
                 self.impacts,
-                method=self.method,
                 model_version=record["model_version"],
                 estimated_at=datetime.fromisoformat(record["created_at"]),
+                fingerprint=fingerprint,
             )
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
             raise AppraisalError(f"unusable output: {e!r}") from e
 
     def appraise(self, listing: Listing) -> Appraisal:
         key = self._cache_key(listing)
+        fingerprint = digest(key)
         if self.cache is not None and (record := self.cache.get(key)) is not None:
-            return self._parse(record)
+            return self._parse(record, fingerprint)
         record = self._call_api(listing)
-        appraisal = self._parse(record)  # only usable responses are stored; failures retry
+        # Only usable responses are stored, so failures are retried next time.
+        appraisal = self._parse(record, fingerprint)
         if self.cache is not None:
             self.cache.put(key, record)
         return appraisal

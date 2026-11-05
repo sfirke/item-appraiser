@@ -83,7 +83,7 @@ def test_appraisal_multiplies_quantity_by_unit_price(tmp_path):
     assert result.new_price_usd == 37.5
     assert result.quantity == 3
     assert result.condition == Condition.USED
-    assert result.method == "deepseek"
+    assert result.assumption == OUTPUT["assumption"]
     assert result.model_version == "deepseek-flash/p4+img+qty"
 
 
@@ -276,9 +276,43 @@ def test_estimate_scales_with_photos(tmp_path):
     assert with_photos > appraiser(tmp_path, use_images=False).estimate_cost([LISTING]) > 0
 
 
-def test_unpriced_model_is_rejected(tmp_path):
-    with pytest.raises(ValueError):
-        appraiser(tmp_path, model="deepseek-v4-pro")
+def test_unpriced_model_works_without_cost_tracking(tmp_path):
+    a = appraiser(tmp_path, model="deepseek-v4-pro", use_images=False)
+    assert a.appraise(LISTING).model_version.startswith("deepseek-v4-pro/")
+    assert a.spent_usd == 0
+    with pytest.raises(ValueError, match="price="):
+        a.estimate_cost([LISTING])
+
+
+def test_unpriced_model_tracks_costs_with_a_given_price(tmp_path):
+    price = deepseek.Price(input=0.66, output=1.98, cache_read=0.022)
+    a = appraiser(tmp_path, model="deepseek-v4-pro", use_images=False, price=price)
+    a.appraise(LISTING)
+    assert a.spent_usd > 0
+    assert a.stored_cost([LISTING]) == pytest.approx(a.spent_usd)
+
+
+def test_appraisal_carries_the_fingerprint_of_its_listing(tmp_path):
+    a = appraiser(tmp_path)
+    fresh = a.appraise(LISTING)
+    cached = a.appraise(LISTING)
+    assert fresh.fingerprint == cached.fingerprint == a.fingerprint(LISTING)
+    assert len(fresh.fingerprint) == 64
+    # The two fingerprints answer different questions and never coincide.
+    assert fresh.model_fingerprint == "fp_a" != fresh.fingerprint
+
+
+def test_fingerprint_differs_from_claudes_for_the_same_listing(tmp_path):
+    from item_appraiser.claude import ClaudeAppraiser
+
+    claude_appraiser = ClaudeAppraiser(client=object(), image_check=lambda url: True)
+    assert appraiser(tmp_path).fingerprint(LISTING) != claude_appraiser.fingerprint(LISTING)
+
+
+@pytest.mark.parametrize("change", [{"name": "Garden gnomes"}, {"description": "Badly chipped"}])
+def test_editing_the_listing_changes_its_fingerprint(tmp_path, change):
+    a = appraiser(tmp_path)
+    assert a.fingerprint(Listing(**{**vars(LISTING), **change})) != a.fingerprint(LISTING)
 
 
 def test_missing_openai_package_gives_an_install_hint(monkeypatch):

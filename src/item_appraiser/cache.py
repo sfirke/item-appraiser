@@ -10,13 +10,17 @@ import os
 from pathlib import Path
 
 
+def digest(key: dict) -> str:
+    """A stable hex digest of a JSON-serializable key."""
+    return hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()
+
+
 class ResponseCache:
     def __init__(self, directory: str | os.PathLike):
         self.directory = Path(directory)
 
     def path(self, key: dict) -> Path:
-        digest = hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()
-        return self.directory / f"{digest}.json"
+        return self.directory / f"{digest(key)}.json"
 
     def __contains__(self, key: dict) -> bool:
         return self.path(key).exists()

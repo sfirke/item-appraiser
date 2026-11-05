@@ -25,7 +25,7 @@ except ImportError:  # the core package works without it; only this appraiser ne
     openai = None
 
 from item_appraiser import prompt
-from item_appraiser.cache import ResponseCache
+from item_appraiser.cache import ResponseCache, digest
 from item_appraiser.images import image_is_reachable
 from item_appraiser.models import MONEY_ONLY, Appraisal, AppraisalError, Impact, Listing
 
@@ -97,9 +97,11 @@ class DeepSeekAppraiser:
     `appraise()` raises AppraisalError when the model gives no usable answer for a
     listing, or the API rejects or fails that one request; other listings may
     still succeed. Authentication and permission errors propagate unchanged.
-    """
 
-    method = "deepseek"
+    Any DeepSeek model works (only Flash reads photos). Costs are tracked for the
+    models in `PRICES`; for another model, pass its `price` or go without cost
+    tracking.
+    """
 
     def __init__(
         self,
@@ -110,14 +112,14 @@ class DeepSeekAppraiser:
         client: "openai.OpenAI | None" = None,
         image_check: Callable[[str], bool] | None = None,
         impacts: Iterable[Impact | str] = MONEY_ONLY,
+        price: Price | None = None,
     ):
-        if model not in PRICES:
-            raise ValueError(f"no pricing for model {model}; known models: {', '.join(PRICES)}")
         if client is None and openai is None:
             raise ImportError(
                 "DeepSeekAppraiser needs the openai package: pip install 'item-appraiser[deepseek]'"
             )
         self.model = model
+        self.price = price or PRICES.get(model)  # None: costs aren't tracked
         self.use_images = use_images
         self.use_quantity = use_quantity
         self.impacts = prompt.normalize_impacts(impacts)
@@ -128,7 +130,8 @@ class DeepSeekAppraiser:
         )
         if Impact.CLIMATE in self.impacts:
             self.model_version += f"+co2-{prompt.FOOTPRINT_VERSION}"
-        self.spent_usd = 0.0  # what this object paid for, including unusable responses
+        # What this object paid for, including unusable responses; stays 0 without a price.
+        self.spent_usd = 0.0
         self._client = client
         self._image_check = image_check or image_is_reachable
         self._schema = prompt.output_schema(use_quantity, self.impacts)
@@ -166,6 +169,21 @@ class DeepSeekAppraiser:
             "text": prompt.listing_text(listing, len(urls)),
         }
 
+    def fingerprint(self, listing: Listing) -> str:
+        """Identifies everything a fresh appraisal of `listing` would depend on.
+
+        The same value is stored on each `Appraisal`; when they differ, the listing
+        (name, description, photos) or the appraiser's model or prompt has changed
+        since it was estimated. It can't cover DeepSeek re-pointing the model name;
+        `Appraisal.model_fingerprint` records that after the fact.
+        """
+        return digest(self._cache_key(listing))
+
+    def _require_price(self) -> Price:
+        if self.price is None:
+            raise ValueError(f"no pricing for model {self.model}; pass price= to track costs")
+        return self.price
+
     def uncached(self, listings: Iterable[Listing]) -> list[Listing]:
         """The listings that would need an API call (all of them, without a cache)."""
         if self.cache is None:
@@ -174,7 +192,7 @@ class DeepSeekAppraiser:
 
     def estimate_cost(self, listings: Iterable[Listing]) -> float:
         """Upper-end USD estimate for calling the API on `listings`: peak rates, no prompt caching."""
-        price = PRICES[self.model]
+        price = self._require_price()
         total = 0.0
         for listing in listings:
             images = len(self._image_urls(listing))
@@ -183,22 +201,23 @@ class DeepSeekAppraiser:
             total += input_tokens * price.input + ESTIMATED_OUTPUT_TOKENS * price.output
         return total / 1_000_000
 
-    def _record_cost(self, record: dict) -> float:
+    def _record_cost(self, record: dict, price: Price) -> float:
         return usage_cost(
             record["response"].get("usage") or {},
-            PRICES[self.model],
+            price,
             datetime.fromisoformat(record["created_at"]),
         )
 
     def stored_cost(self, listings: Iterable[Listing]) -> float:
         """What the cached responses for `listings` cost when they were made."""
+        price = self._require_price()
         if self.cache is None:
             return 0.0
         total = 0.0
         for listing in listings:
             record = self.cache.get(self._cache_key(listing))
             if record is not None:
-                total += self._record_cost(record)
+                total += self._record_cost(record, price)
         return total
 
     def _request(self, listing: Listing, urls: tuple[str, ...]) -> dict:
@@ -245,10 +264,11 @@ class DeepSeekAppraiser:
             "images_unreachable": len(urls) - len(reachable),
             "response": completion.model_dump(mode="json"),
         }
-        self.spent_usd += self._record_cost(record)
+        if self.price is not None:
+            self.spent_usd += self._record_cost(record, self.price)
         return record
 
-    def _parse(self, record: dict) -> Appraisal:
+    def _parse(self, record: dict, fingerprint: str) -> Appraisal:
         choices = record["response"].get("choices") or []
         if not choices:
             raise AppraisalError("no choices in the response")
@@ -265,9 +285,9 @@ class DeepSeekAppraiser:
                 output,
                 self.use_quantity,
                 self.impacts,
-                method=self.method,
                 model_version=record["model_version"],
                 estimated_at=datetime.fromisoformat(record["created_at"]),
+                fingerprint=fingerprint,
                 model_fingerprint=record["response"].get("system_fingerprint"),
             )
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
@@ -275,10 +295,12 @@ class DeepSeekAppraiser:
 
     def appraise(self, listing: Listing) -> Appraisal:
         key = self._cache_key(listing)
+        fingerprint = digest(key)
         if self.cache is not None and (record := self.cache.get(key)) is not None:
-            return self._parse(record)
+            return self._parse(record, fingerprint)
         record = self._call_api(listing)
-        appraisal = self._parse(record)  # only usable responses are stored; failures retry
+        # Only usable responses are stored, so failures are retried next time.
+        appraisal = self._parse(record, fingerprint)
         if self.cache is not None:
             self.cache.put(key, record)
         return appraisal

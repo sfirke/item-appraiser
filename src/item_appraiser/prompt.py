@@ -176,7 +176,7 @@ def parse_output(
 ) -> Appraisal:
     """Turn the model's JSON output into an Appraisal.
 
-    `metadata` fills the bookkeeping fields (method, model_version, estimated_at).
+    `metadata` fills the bookkeeping fields (model_version, estimated_at, fingerprint).
     Raises KeyError, TypeError or ValueError on output that doesn't fit the schema
     or makes no sense, such as a zero quantity, a negative price or an unknown
     footprint category.
@@ -190,7 +190,7 @@ def parse_output(
         unit_price = float(output["unit_new_price_usd"])
         if quantity < 1:
             raise ValueError(f"quantity {quantity}")
-        new_price = quantity * unit_price
+        new_price = round(quantity * unit_price, 2)
     else:
         quantity, unit_price = None, None
         new_price = float(output["new_price_usd"])
@@ -201,7 +201,7 @@ def parse_output(
         condition=Condition(output["condition"]),
         resale_demand=ResaleDemand(output["resale_demand"]),
         confidence=Confidence(output["confidence"]),
-        assumptions=output["assumption"],
+        assumption=output["assumption"],
         quantity=quantity,
         unit_new_price_usd=unit_price,
         footprint_category=footprint_category,

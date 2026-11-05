@@ -53,6 +53,75 @@ def test_to_dict_is_json_ready_and_includes_derived_values():
     assert data["model_fingerprint"] is None  # set only by providers that report one
 
 
+def test_from_dict_round_trips_to_dict():
+    appraisal = Appraisal(
+        new_price_usd=37.5,
+        condition=Condition.USED,
+        resale_demand=ResaleDemand.WEAK,
+        confidence=Confidence.MEDIUM,
+        assumption="Priced as three resin gnomes.",
+        model_version="claude-sonnet-5-5/p4+img+qty",
+        estimated_at=datetime(2026, 11, 4, tzinfo=UTC),
+        quantity=3,
+        unit_new_price_usd=12.5,
+        fingerprint="abc",
+    )
+    stored = json.loads(json.dumps(appraisal.to_dict()))
+    assert Appraisal.from_dict(stored) == appraisal
+
+    climate = Appraisal(
+        100,
+        Condition.NEW,
+        footprint_category=FootprintCategory.TOYS_AND_GAMES,
+        impacts=frozenset({Impact.MONEY, Impact.CLIMATE}),
+    )
+    stored = json.loads(json.dumps(climate.to_dict()))
+    assert "giveaway_kg_co2e" in stored
+    rebuilt = Appraisal.from_dict(stored)
+    assert rebuilt == climate
+    assert rebuilt.giveaway_kg_co2e == climate.giveaway_kg_co2e
+
+
+def test_model_fingerprint_round_trips_through_storage():
+    appraisal = Appraisal(10, Condition.USED, fingerprint="abc", model_fingerprint="fp_a")
+    assert Appraisal.from_dict(json.loads(json.dumps(appraisal.to_dict()))) == appraisal
+
+
+def test_from_dict_ignores_derived_and_unknown_keys_and_fills_defaults():
+    appraisal = Appraisal.from_dict(
+        {"new_price_usd": 100, "condition": "like new", "buy_value_usd": 1, "extra": "x"}
+    )
+    assert appraisal == Appraisal(100, Condition.LIKE_NEW)
+    assert appraisal.buy_value_usd == 80
+    assert Appraisal.from_dict(
+        {"new_price_usd": 1, "condition": "new", "resale_demand": None, "confidence": None}
+    ) == Appraisal(1, Condition.NEW)
+
+
+def test_to_dict_fields_are_stable():
+    assert list(Appraisal(1, Condition.NEW).to_dict()) == [
+        "new_price_usd",
+        "condition",
+        "resale_demand",
+        "confidence",
+        "assumption",
+        "model_version",
+        "estimated_at",
+        "quantity",
+        "unit_new_price_usd",
+        "footprint_category",
+        "impacts",
+        "fingerprint",
+        "model_fingerprint",
+        "buy_value_usd",
+        "loan_value_usd",
+    ]
+
+
+def test_package_reports_its_version():
+    assert item_appraiser.__version__ == "0.1.0"
+
+
 def test_to_dict_reports_only_the_requested_impacts():
     both = Appraisal(
         100,

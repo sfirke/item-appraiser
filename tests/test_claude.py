@@ -78,9 +78,13 @@ def test_appraisal_multiplies_quantity_by_unit_price(tmp_path):
     assert result.unit_new_price_usd == 12.5
     assert result.condition == Condition.USED
     assert result.confidence == Confidence.MEDIUM
-    assert result.assumptions == OUTPUT["assumption"]
-    assert result.method == "claude"
+    assert result.assumption == OUTPUT["assumption"]
     assert result.model_version == "claude-sonnet-5-5/p4+img+qty"
+
+
+def test_new_price_is_rounded_to_cents(tmp_path):
+    client = FakeClient(message({**OUTPUT, "quantity": 3, "unit_new_price_usd": 19.99}))
+    assert appraiser(tmp_path, client).appraise(LISTING).new_price_usd == 59.97
 
 
 def test_appraisal_reads_weak_resale_demand_and_policy_applies_it(tmp_path):
@@ -230,9 +234,51 @@ def test_estimate_scales_with_photos_and_model(tmp_path):
     )
 
 
-def test_unpriced_model_is_rejected(tmp_path):
-    with pytest.raises(ValueError):
-        appraiser(tmp_path, model="claude-unknown")
+def test_unpriced_model_works_without_cost_tracking(tmp_path):
+    a = appraiser(tmp_path, model="claude-unknown")
+    assert a.appraise(LISTING).model_version.startswith("claude-unknown/")
+    assert a.spent_usd == 0
+    with pytest.raises(ValueError, match="price="):
+        a.estimate_cost([LISTING])
+
+
+def test_unpriced_model_tracks_costs_with_a_given_price(tmp_path):
+    a = appraiser(tmp_path, model="claude-unknown", price=claude.PRICES[claude.SONNET])
+    a.appraise(LISTING)
+    assert a.spent_usd == pytest.approx((1000 * 2.00 + 200 * 10.00 + 2000 * 0.20) / 1_000_000)
+
+
+def test_appraisal_carries_the_fingerprint_of_its_listing(tmp_path):
+    a = appraiser(tmp_path)
+    fresh = a.appraise(LISTING)
+    cached = a.appraise(LISTING)
+    assert fresh.fingerprint == cached.fingerprint == a.fingerprint(LISTING)
+    assert len(fresh.fingerprint) == 64
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"name": "Garden gnomes"},
+        {"description": "Badly chipped"},
+        {"image_urls": ("https://example.com/other.jpg",)},
+    ],
+)
+def test_editing_the_listing_changes_its_fingerprint(tmp_path, change):
+    a = appraiser(tmp_path)
+    edited = Listing(**{**vars(LISTING), **change})
+    assert a.fingerprint(edited) != a.fingerprint(LISTING)
+
+
+def test_item_id_and_model_settings_affect_the_fingerprint_as_expected(tmp_path):
+    a = appraiser(tmp_path)
+    assert a.fingerprint(Listing(**{**vars(LISTING), "item_id": "x"})) == a.fingerprint(LISTING)
+    assert appraiser(tmp_path, model=claude.HAIKU).fingerprint(LISTING) != a.fingerprint(LISTING)
+    assert appraiser(tmp_path, use_images=False).fingerprint(LISTING) != a.fingerprint(LISTING)
+    climate_output = {**OUTPUT, "footprint_category": "plastic household goods"}
+    climate = appraiser(tmp_path, FakeClient(message(climate_output)), impacts=["money", "climate"])
+    assert climate.fingerprint(LISTING) != a.fingerprint(LISTING)
+    assert climate.appraise(LISTING).fingerprint == climate.fingerprint(LISTING)
 
 
 def test_prompts_differ_only_in_the_quantity_section():

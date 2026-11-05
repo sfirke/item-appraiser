@@ -2,8 +2,8 @@
 
 The CSV needs `name` and `new_price_usd` columns; `description`, `image_urls`
 (space-separated), `item_id`, `category`, `quantity`, `condition`,
-`resale_demand`, `confidence`, `assumptions`, `method` and `model_version` are
-read when present. Rows with no `new_price_usd` are skipped as not yet valued.
+`resale_demand`, `confidence`, `assumption` (or `assumptions`) and
+`model_version` are read when present. Rows with no `new_price_usd` are skipped as not yet valued.
 """
 
 import csv
@@ -54,9 +54,8 @@ def parse_row(row: dict[str, str]) -> LabeledItem | None:
         condition=Condition.parse(row.get("condition")),
         resale_demand=ResaleDemand.parse(row.get("resale_demand")),
         confidence=Confidence.parse(row.get("confidence")),
-        assumptions=row.get("assumptions") or "",
-        method=row.get("method") or "hand",
-        model_version=row.get("model_version") or "",
+        assumption=row.get("assumption") or row.get("assumptions") or "",
+        model_version=row.get("model_version") or "hand",
     )
     return LabeledItem(listing, label, category=(row.get("category") or "").strip())
 
