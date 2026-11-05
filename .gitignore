@@ -221,3 +221,6 @@ __marimo__/
 
 # Sampled Meutch listings are real member content; keep them out of the public repo
 data/
+
+# Local Claude Code worktrees
+.claude/worktrees/
