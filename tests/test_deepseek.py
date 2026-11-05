@@ -8,7 +8,13 @@ import pytest
 
 from item_appraiser import deepseek, evaluate, prompt
 from item_appraiser.deepseek import DeepSeekAppraiser
-from item_appraiser.models import AppraisalError, Condition, FootprintCategory, Listing
+from item_appraiser.models import (
+    Appraisal,
+    AppraisalError,
+    Condition,
+    FootprintCategory,
+    Listing,
+)
 
 FIXTURE = Path(__file__).parent / "fixtures" / "items.csv"
 
@@ -33,9 +39,10 @@ USAGE = {
 }
 
 
-def completion(output=OUTPUT, finish_reason="stop", content=None):
+def completion(output=OUTPUT, finish_reason="stop", content=None, fingerprint="fp_a"):
     body = {
         "model": "deepseek-flash",
+        "system_fingerprint": fingerprint,
         "choices": [
             {
                 "index": 0,
@@ -78,6 +85,30 @@ def test_appraisal_multiplies_quantity_by_unit_price(tmp_path):
     assert result.condition == Condition.USED
     assert result.method == "deepseek"
     assert result.model_version == "deepseek-flash/p4+img+qty"
+
+
+def test_appraisal_carries_the_backend_fingerprint_through_the_cache(tmp_path):
+    first = appraiser(tmp_path).appraise(LISTING)
+    assert first.model_fingerprint == "fp_a"
+    assert first.to_dict()["model_fingerprint"] == "fp_a"
+    assert appraiser(tmp_path).appraise(LISTING).model_fingerprint == "fp_a"
+
+
+def test_missing_fingerprint_is_none(tmp_path):
+    client = FakeClient(completion(fingerprint=None))
+    assert appraiser(tmp_path, client).appraise(LISTING).model_fingerprint is None
+
+
+def test_fingerprint_note():
+    def a(fingerprint):
+        return Appraisal(10, Condition.USED, model_fingerprint=fingerprint)
+
+    assert evaluate.fingerprint_note([a(None), a(None)]) == ""
+    assert evaluate.fingerprint_note([a("fp_a"), a("fp_a")]) == "\nmodel fingerprint: fp_a"
+    mixed = evaluate.fingerprint_note([a("fp_a"), a("fp_b"), a("fp_a")])
+    assert "WARNING: answers came from 2 model fingerprints" in mixed
+    assert "   2  fp_a" in mixed
+    assert "   1  fp_b" in mixed
 
 
 def test_request_uses_json_mode_low_effort_and_reachable_photos_first(tmp_path):
@@ -287,6 +318,20 @@ class TestEvaluateMain:
         self.run()  # no --yes: a cost prompt here would fail under pytest
         assert "this run spent $0.0000" in capsys.readouterr().out
         assert len(fake_api.requests) == 3
+
+    def test_report_names_the_fingerprint(self, tmp_path, fake_api, capsys):
+        self.run("--yes", "--cache-dir", str(tmp_path))
+        out = capsys.readouterr().out
+        assert "model fingerprint: fp_a" in out
+        assert "WARNING" not in out
+
+    def test_report_warns_when_answers_mix_fingerprints(self, tmp_path, fake_api, capsys):
+        fake_api.responses = [completion(fingerprint="fp_b")]  # then fp_a for the rest
+        self.run("--yes", "--cache-dir", str(tmp_path))
+        out = capsys.readouterr().out
+        assert "WARNING: answers came from 2 model fingerprints" in out
+        assert "   2  fp_a" in out
+        assert "   1  fp_b" in out
 
     def test_claude_model_is_rejected_for_deepseek(self, tmp_path, fake_api):
         with pytest.raises(SystemExit):

@@ -50,6 +50,7 @@ def test_to_dict_is_json_ready_and_includes_derived_values():
     assert data["estimated_at"] == "2026-11-04T00:00:00+00:00"
     assert data["buy_value_usd"] == 32
     assert data["loan_value_usd"] == 16
+    assert data["model_fingerprint"] is None  # set only by providers that report one
 
 
 def test_to_dict_reports_only_the_requested_impacts():

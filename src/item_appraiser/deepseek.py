@@ -38,6 +38,8 @@ API_KEY_VARIABLE = "DEEPSEEK_API_KEY"
 # any change here.
 FLASH = "deepseek-flash"
 DEFAULT_MODEL = FLASH
+# Each response's system_fingerprint becomes Appraisal.model_fingerprint, so a
+# change of backend behind the alias can at least be detected.
 
 REASONING_EFFORT = "low"  # DeepSeek's levels are low, high and max
 MAX_TOKENS = 16000  # thinking counts toward this, so leave plenty of room
@@ -266,6 +268,7 @@ class DeepSeekAppraiser:
                 method=self.method,
                 model_version=record["model_version"],
                 estimated_at=datetime.fromisoformat(record["created_at"]),
+                model_fingerprint=record["response"].get("system_fingerprint"),
             )
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
             raise AppraisalError(f"unusable output: {e!r}") from e

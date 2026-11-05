@@ -157,6 +157,11 @@ class Appraisal:
     footprint_category: FootprintCategory | None = None
     # What the appraisal was requested for; decides which derived values to_dict() reports.
     impacts: frozenset[Impact] = MONEY_ONLY
+    # What the provider reported about the backend that answered, when the model name
+    # alone doesn't pin it (DeepSeek's system_fingerprint). A new value means the model
+    # or its serving setup changed, so estimates may not be comparable with older ones.
+    # None when the provider pins the model by name (Claude) or reported nothing.
+    model_fingerprint: str | None = None
 
     @property
     def buy_value_usd(self) -> float:

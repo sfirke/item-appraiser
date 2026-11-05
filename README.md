@@ -34,10 +34,13 @@ scored against hand-valued items (see Results).
 - **DeepSeek V4.1 Flash** (`DeepSeekAppraiser`). It scored better than Sonnet on
   the 50 held-out items, at about an eighth of the cost ($0.0003 per item), but
   it has been scored on only those 50. `deepseek-flash` is a name DeepSeek moves
-  to newer models over time, so its answers can change without notice.
+  to newer models over time, so its answers can change without notice. You can
+  detect a change, though not prevent it: each appraisal's `model_fingerprint`
+  records the backend that answered (see below).
 
-Store `model_version` with each appraisal either way, so you can tell later
-which model produced it.
+Store `model_version` with each appraisal either way, plus `model_fingerprint`
+for DeepSeek, so you can tell later which model produced it. If you need fixed
+numbers, re-appraising old items is your call; the library won't do it for you.
 
 
 ## Usage
@@ -110,7 +113,13 @@ settings.
 - `model`: `deepseek-flash` (`item_appraiser.deepseek.FLASH`), the only DeepSeek
   model that reads photos. DeepSeek points that name at newer model versions
   over time, so `model_version` (`deepseek-flash/p4+img+qty`) doesn't pin the
-  exact model the way a Claude model ID does.
+  exact model the way a Claude model ID does. Each appraisal's
+  `model_fingerprint` holds the `system_fingerprint` DeepSeek reported for that
+  answer. A new value means the model or its serving setup changed, so newer
+  estimates may not be comparable with older ones. DeepSeek doesn't document
+  exactly what changes it, so treat it as a signal to check, not a version
+  number. Claude appraisals leave it `None`, since the model ID already pins
+  the model.
 - `client`: a configured `openai.OpenAI` client with `base_url` set to
   `https://api.deepseek.com`. Without one, the appraiser builds its own from
   `DEEPSEEK_API_KEY`, and never falls back to `OPENAI_API_KEY`.
@@ -313,6 +322,12 @@ skips the question). Responses are cached in `data/cache/claude/` or
 `data/cache/deepseek/` (`--cache-dir` to change it), so re-scoring costs nothing
 and needs no API key.
 
+DeepSeek runs also print the model fingerprint the answers came from. Cached
+answers are keyed by the name `deepseek-flash`, so after DeepSeek moves that name
+to a newer model, a partly cached run would mix the two. When the scored answers
+span more than one fingerprint, the report prints a warning with a count for
+each; score each model with its own `--cache-dir` before comparing them.
+
 `--impacts money,climate` adds an unscored climate summary after the report:
 totals, how many items fell in each footprint category, every item in "other"
 or the zero-footprint category, and the largest footprints with the model's
@@ -350,6 +365,7 @@ measure means.
 | Resale demand, items disagreeing with hand label | lower | 17 | **13** |
 | Cost per item | lower | $0.0026 | **$0.0003** |
 | Model ID | | `claude-sonnet-5-5` | `deepseek-flash` |
+| Model fingerprint | | (pinned by ID) | `bc19ba97…` (all 50 answers) |
 
 Takeaways:
 
@@ -367,8 +383,8 @@ Takeaways:
 - **Each has a case, so neither is the default.** Sonnet is the model the
   prompt was tuned on, scored on 100 items, with a pinned model ID. DeepSeek did
   better here and costs far less, but this is one 50-item set and one run, and
-  `deepseek-flash` moves to newer models over time (it served V4.1-Flash-1017 in
-  November 2026). Scoring DeepSeek on the first 50 items as well would show
+  `deepseek-flash` moves to newer models over time (it served V4.1-Flash-1017,
+  fingerprint `bc19ba97cbe016479903222bb1578db6`, in November 2026). Scoring DeepSeek on the first 50 items as well would show
   whether its lead holds.
 
 

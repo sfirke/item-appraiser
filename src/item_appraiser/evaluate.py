@@ -314,13 +314,35 @@ def confirm_api_cost(
         load_dotenv()
 
 
-def cost_notes(appraiser: LLMAppraiser, listings: Sequence[Listing], appraised: int) -> str:
+def fingerprint_note(appraisals: Sequence[Appraisal]) -> str:
+    """Which backends answered, for providers whose model name doesn't pin the model.
+
+    More than one fingerprint means the scored answers may come from different
+    models under the same name, e.g. old cached answers mixed with new live ones.
+    """
+    counts = Counter(a.model_fingerprint for a in appraisals if a.model_fingerprint)
+    if not counts:
+        return ""
+    if len(counts) == 1:
+        return f"\nmodel fingerprint: {next(iter(counts))}"
+    lines = [
+        f"\nWARNING: answers came from {len(counts)} model fingerprints, so this run may "
+        "mix models. Score them separately (e.g. a fresh --cache-dir) before comparing."
+    ]
+    lines += [f"  {count:>4}  {fingerprint}" for fingerprint, count in counts.most_common()]
+    return "\n".join(lines)
+
+
+def cost_notes(
+    appraiser: LLMAppraiser, listings: Sequence[Listing], appraisals: Sequence[Appraisal]
+) -> str:
     stored = appraiser.stored_cost(listings)
-    per_item = stored / appraised if appraised else 0.0
+    per_item = stored / len(appraisals) if appraisals else 0.0
     return (
         f"model version: {appraiser.model_version}\n"
-        f"cost: ${stored:.4f} for {appraised} stored responses "
+        f"cost: ${stored:.4f} for {len(appraisals)} stored responses "
         f"(${per_item:.5f} per item); this run spent ${appraiser.spent_usd:.4f}"
+        + fingerprint_note(appraisals)
     )
 
 
@@ -329,7 +351,8 @@ def run_llm(items: Sequence[LabeledItem], args: argparse.Namespace) -> Run:
     listings = [item.listing for item in items]
     confirm_api_cost(appraiser, listings, args)
     predictions, failures = predict_collecting_failures(appraiser, items)
-    return Run(predictions, failures, cost_notes(appraiser, listings, len(predictions)))
+    appraisals = [p.appraisal for p in predictions]
+    return Run(predictions, failures, cost_notes(appraiser, listings, appraisals))
 
 
 def climate_summary(results: Sequence[tuple[Listing, Appraisal]], top: int = 5) -> str:
@@ -376,7 +399,7 @@ def run_unlabeled(args: argparse.Namespace) -> None:
             results.append((listing, appraiser.appraise(listing)))
         except AppraisalError as e:
             failures.append((listing, str(e)))
-    print(f"{cost_notes(appraiser, listings, len(results))}\n")
+    print(f"{cost_notes(appraiser, listings, [a for _, a in results])}\n")
     print(climate_summary(results, top=args.worst))
     if failures:
         print(f"\n{len(failures)} listings failed:")
