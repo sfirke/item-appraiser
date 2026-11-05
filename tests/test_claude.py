@@ -7,7 +7,16 @@ import pytest
 
 from item_appraiser import claude, dataset, evaluate, policy, prompt
 from item_appraiser.claude import ClaudeAppraiser
-from item_appraiser.models import AppraisalError, Condition, Confidence, Listing, ResaleDemand
+from item_appraiser.climate import PRICE_YEAR_ADJUSTMENT
+from item_appraiser.models import (
+    AppraisalError,
+    Condition,
+    Confidence,
+    FootprintCategory,
+    Impact,
+    Listing,
+    ResaleDemand,
+)
 
 FIXTURE = Path(__file__).parent / "fixtures" / "items.csv"
 
@@ -353,3 +362,124 @@ def test_missing_anthropic_package_gives_an_install_hint(monkeypatch):
 def test_injected_client_works_without_the_anthropic_package(tmp_path, monkeypatch):
     monkeypatch.setattr(claude, "anthropic", None)
     assert appraiser(tmp_path).appraise(LISTING).new_price_usd == 37.5
+
+
+CLIMATE_OUTPUT = {**OUTPUT, "footprint_category": "plastic household goods"}
+
+
+def test_money_only_is_the_default_and_asks_for_no_footprint(tmp_path):
+    client = FakeClient()
+    result = appraiser(tmp_path, client).appraise(LISTING)
+    request = client.requests[0]
+    assert "footprint_category" not in request["output_config"]["format"]["schema"]["properties"]
+    assert "Footprint category" not in request["system"][0]["text"]
+    assert result.footprint_category is None
+    assert result.impacts == {Impact.MONEY}
+    assert result.new_item_kg_co2e is None
+
+
+def test_climate_adds_a_footprint_category_to_the_same_call(tmp_path):
+    client = FakeClient(message(CLIMATE_OUTPUT))
+    result = appraiser(tmp_path, client, impacts=["money", "climate"]).appraise(LISTING)
+    assert len(client.requests) == 1
+    request = client.requests[0]
+    schema = request["output_config"]["format"]["schema"]
+    assert list(schema["properties"])[:2] == ["assumption", "footprint_category"]
+    assert "footprint_category" in schema["required"]
+    assert set(schema["properties"]["footprint_category"]["enum"]) == {
+        c.value for c in FootprintCategory
+    }
+    assert request["system"][0]["text"].startswith(prompt.system_prompt(True))
+    assert "Footprint category." in request["system"][0]["text"]
+    assert result.footprint_category == FootprintCategory.PLASTIC_GOODS
+    assert result.model_version == "claude-sonnet-5-5/p4+img+qty+co2-f1"
+    assert result.new_item_kg_co2e == round(37.5 * PRICE_YEAR_ADJUSTMENT * 0.332, 1)
+    assert result.buy_value_usd == 22.5
+
+
+def test_climate_only_still_estimates_price_but_reports_only_climate(tmp_path):
+    client = FakeClient(message(CLIMATE_OUTPUT))
+    result = appraiser(tmp_path, client, impacts=[Impact.CLIMATE]).appraise(LISTING)
+    data = result.to_dict()
+    assert data["impacts"] == ["climate"]
+    assert "buy_value_usd" not in data
+    assert data["new_item_kg_co2e"] == result.new_item_kg_co2e
+    assert data["giveaway_kg_co2e"] == result.giveaway_kg_co2e
+    assert data["loan_kg_co2e"] == result.loan_kg_co2e
+
+
+def test_money_only_cache_key_is_unchanged_so_old_responses_still_hit(tmp_path):
+    key = appraiser(tmp_path)._cache_key(LISTING)
+    assert set(key) == {
+        "model",
+        "prompt_version",
+        "effort",
+        "system",
+        "schema",
+        "image_urls",
+        "text",
+    }
+
+
+def test_adding_climate_misses_the_money_only_cache(tmp_path):
+    appraiser(tmp_path).appraise(LISTING)
+    assert appraiser(tmp_path, impacts=["money", "climate"]).uncached([LISTING]) == [LISTING]
+
+
+def test_unknown_footprint_category_fails_and_is_not_cached(tmp_path):
+    client = FakeClient(message({**OUTPUT, "footprint_category": "spaceships"}))
+    a = appraiser(tmp_path, client, impacts=["climate"])
+    with pytest.raises(AppraisalError):
+        a.appraise(LISTING)
+    assert a.uncached([LISTING]) == [LISTING]
+
+
+@pytest.mark.parametrize("impacts", [[], ["carbon"], "climate"])
+def test_bad_impacts_are_rejected(tmp_path, impacts):
+    with pytest.raises((ValueError, TypeError)):
+        appraiser(tmp_path, impacts=impacts)
+
+
+def test_climate_prompt_costs_more_to_estimate(tmp_path):
+    money = appraiser(tmp_path).estimate_cost([LISTING])
+    both = appraiser(tmp_path, impacts=["money", "climate"]).estimate_cost([LISTING])
+    assert both > money
+
+
+class TestEvaluateClimate:
+    @pytest.fixture
+    def fake_api(self, monkeypatch):
+        client = FakeClient(*[message(CLIMATE_OUTPUT) for _ in range(4)])
+        monkeypatch.setattr(claude.anthropic, "Anthropic", lambda: client)
+        monkeypatch.setattr(claude, "image_is_reachable", lambda url: True)
+        monkeypatch.setattr(evaluate, "load_dotenv", lambda: None)
+        return client
+
+    def run(self, tmp_path, *extra):
+        evaluate.main(
+            ["--data", str(FIXTURE), "--appraiser", "claude", "--cache-dir", str(tmp_path), *extra]
+        )
+
+    def test_climate_run_adds_an_unscored_summary(self, tmp_path, fake_api, capsys):
+        self.run(tmp_path, "--yes", "--impacts", "money,climate")
+        out = capsys.readouterr().out
+        assert "buy value" in out
+        assert "climate impact, 3 items (unscored; no hand labels)" in out
+        assert "   3  100%  plastic household goods" in out
+        assert "largest new-item footprints" in out
+
+    def test_unlabeled_appraises_every_row_and_skips_scoring(self, tmp_path, fake_api, capsys):
+        self.run(tmp_path, "--yes", "--impacts", "climate", "--unlabeled")
+        out = capsys.readouterr().out
+        assert "claude on 4 listings" in out  # includes the row not yet valued
+        assert "climate impact, 4 items" in out
+        assert "typical error" not in out
+        assert len(fake_api.requests) == 4
+
+    def test_unlabeled_needs_climate(self, tmp_path, fake_api):
+        with pytest.raises(SystemExit):
+            self.run(tmp_path, "--yes", "--unlabeled")
+
+    def test_bad_impacts_flag_is_a_usage_error(self, tmp_path, fake_api):
+        with pytest.raises(SystemExit):
+            self.run(tmp_path, "--impacts", "carbon")

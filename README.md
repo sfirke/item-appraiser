@@ -42,6 +42,23 @@ appraisal.loan_value_usd  # 30.35
 appraisal.to_dict()       # every field plus the derived values, ready for JSON or a DB row
 ```
 
+For climate impact too, ask for it:
+
+```python
+appraiser = ClaudeAppraiser(impacts=["money", "climate"])  # or just ["climate"]
+appraisal = appraiser.appraise(listing)
+
+appraisal.footprint_category  # FootprintCategory.POWER_TOOLS
+appraisal.new_item_kg_co2e    # 12.5, the footprint of buying it new
+appraisal.giveaway_kg_co2e    # 4.7, estimated avoided emissions if given away
+appraisal.loan_kg_co2e        # 3.1, estimated avoided emissions per loan
+```
+
+Climate rides on the same API call (one extra field, about 1,400 more prompt
+tokens, mostly cached). The new price is estimated either way, because most
+emission factors are per dollar; `impacts` decides which derived values
+`to_dict()` reports. Money only, the default, sends exactly the tested prompt.
+
 An `Appraisal` also carries the condition, resale demand, the model's confidence,
 a one-sentence assumption a reviewer can check ("Priced as a DeWalt 20V MAX drill
 kit with two batteries..."), the quantity and unit price where the model counted
@@ -58,6 +75,8 @@ identifies the model, prompt version and settings.
 - `client`: a configured `anthropic.Anthropic` client, for a different API key,
   base URL, timeout or retry policy.
 - `use_images`, `use_quantity`: the tested settings are both on.
+- `impacts`: `"money"`, `"climate"`, or both; defaults to money. With climate,
+  `model_version` gains a suffix such as `+co2-f1`.
 
 Each call costs about $0.003 with Sonnet. `appraiser.spent_usd` totals what an
 appraiser has spent, and `appraiser.estimate_cost(listings)` gives an upper-end
@@ -86,6 +105,65 @@ re-appraising anything: store `new_price_usd`, `condition` and `resale_demand`,
 and recompute values with `item_appraiser.buy_value()` and `loan_value()`.
 
 
+## How climate impact is derived
+
+The same split applies. The appraiser says what kind of item it is (one of 44
+`FootprintCategory` values), and a fixed policy in
+`src/item_appraiser/climate.py` does the rest:
+
+- **New-item footprint** (kg CO2e of buying it new, cradle to shelf):
+  - Most categories: new price × an emission factor in kg CO2e per dollar, from
+    USEEIO (see Data sources), with prices converted to the factors' 2024
+    dollars by CPI. Factors run from about 0.05 (DVDs) to 0.5 (glassware)
+    kg per dollar; a $100 cordless drill comes to about 10.5 kg.
+  - Computers, phones, tablets, monitors and TVs: a fixed footprint per unit
+    (laptop 182 kg, smartphone 79 kg, TV 328 kg), because per-dollar factors
+    badly understate imported electronics.
+  - Tickets, gift cards and services: zero, since nothing is manufactured.
+  - Use and end of life are left out: reusing an item avoids neither.
+- **Given away** = new-item footprint × 0.5 (the share of secondhand purchases
+  that replace buying new, the midpoint of published rates from 39% to 65%) ×
+  remaining life (new 1.0, like new 0.9, used 0.75).
+- **Per loan** = new-item footprint × 0.25. Library of Things credits 25-50%
+  of a purchase per borrow; the lower figure leaves room for the same item
+  being lent many times. Capping the total credited to one item across many
+  loans is up to the caller, which sees the loan history.
+
+Report these as **estimated avoided emissions**, separately, and never subtract
+them from anyone's emissions footprint (WBCSD Guidance on Avoided Emissions,
+2025). They're rough: they inherit the new-price error (typically 1.3x per item)
+and the spread within each category, and they haven't been checked against hand
+labels. Store `new_price_usd`, `quantity`, `condition` and `footprint_category`,
+and recompute with `item_appraiser.new_item_kg_co2e()`, `giveaway_kg_co2e()` and
+`loan_kg_co2e()`.
+
+The categories were drawn up against every listing on Meutch (329 when written),
+not just the hand-valued ones, because Meutch's own categories are too coarse
+("Home & Garden" spans light bulbs, saplings, mowers and furniture). To check
+coverage as listings grow, run the climate prompt over a CSV of all listings and
+review what lands in "other" (see Evaluation). Anything recurring there is a
+candidate for a new category; bump `FOOTPRINT_VERSION` in `prompt.py` when the
+categories change.
+
+
+### Data sources
+
+- Spend-based factors: Ingwersen, W., & Young, B. (2025). *Supply Chain
+  Greenhouse Gas Emission Factors for U.S. Commodities* (v1.4.0) [Dataset].
+  Cornerstone Sustainability Data Initiative.
+  https://doi.org/10.5281/zenodo.17202747. Licensed
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). We use the "with
+  margins" (purchaser price) factors for a subset of commodities, picked by
+  2017 NAICS code (noted on each factor in `climate.py`), and convert appraised
+  prices to 2024 dollars with the CPI-U.
+- Per-unit electronics: ADEME, [Impact CO2](https://impactco2.fr/outils/numerique)
+  (manufacturing plus assembly and distribution stages only).
+- Displacement and loan rates: Vinted/Vaayu (2023), Schibsted/Adevinta Second
+  Hand Effect (2023), eBay/Anthesis refurbished and reuse methodology (2023),
+  WRAP (2025), and Library of Things' impact methodology (2024); see the comments
+  in `climate.py`.
+
+
 ## Other models
 
 Only Claude is implemented and tested, but nothing outside `claude.py` depends on
@@ -94,7 +172,8 @@ in `item_appraiser.prompt`, and the on-disk response cache in
 `item_appraiser.cache`. An appraiser for another model with structured output
 would send `prompt.system_prompt()` as the system prompt, the photos plus
 `prompt.listing_text()` as the user message, request `prompt.output_schema()`, and
-pass the parsed JSON to `prompt.parse_output()`. Anything with an
+pass the parsed JSON to `prompt.parse_output()`, giving each the same `impacts`
+to add the footprint category. Anything with an
 `appraise(listing) -> Appraisal` method fits the `Appraiser` protocol and can be
 scored with the evaluation harness below. A different model would need its own
 run against the hand-valued sets before its values are trusted.
@@ -176,6 +255,21 @@ To score Claude, put `ANTHROPIC_API_KEY` in `.env`, then:
 Any run that would call the API prints a cost estimate and asks first (`--yes`
 skips the question). Responses are cached in `data/cache/claude/`, so re-scoring
 costs nothing and needs no API key.
+
+`--impacts money,climate` adds an unscored climate summary after the report:
+totals, how many items fell in each footprint category, every item in "other"
+or the zero-footprint category, and the largest footprints with the model's
+assumption. There are no hand labels for climate, so this is for eyeballing.
+
+To check category coverage across every listing, not just the hand-valued ones,
+draw them all (the sampler with `-n` set to the total) and run `--unlabeled`,
+which appraises every row and prints only the climate summary:
+
+```sh
+python3 scripts/sample_items.py -n 329 --out data/items_all.csv
+.venv/bin/python -m item_appraiser.evaluate --appraiser claude --impacts climate \
+    --unlabeled --data data/items_all.csv
+```
 
 
 ### Results
