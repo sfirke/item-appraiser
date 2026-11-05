@@ -193,8 +193,8 @@ def describe_appraisal(appraisal: Appraisal) -> str:
         text += ", weak resale"
     if appraisal.confidence:
         text += f", {appraisal.confidence} conf."
-    if appraisal.assumptions:
-        text += f": {appraisal.assumptions}"
+    if appraisal.assumption:
+        text += f": {appraisal.assumption}"
     return text
 
 
@@ -247,7 +247,7 @@ def format_report(report: Report) -> str:
                 f"  {math.exp(abs(p.log_ratio)):>5.1f}x  ${predicted:>8.2f} vs ${actual:>8.2f}  "
                 f"{p.item.listing.name}"
             )
-            if p.appraisal.assumptions:
+            if p.appraisal.assumption:
                 lines.append(f"         model: {describe_appraisal(p.appraisal)}")
                 lines.append(f"         hand:  {describe_appraisal(p.item.label)}")
     return "\n".join(lines)
