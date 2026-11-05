@@ -1,9 +1,9 @@
 """Data types shared by appraisers, the value policy, and the evaluation harness."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import datetime
 from enum import StrEnum
-from typing import Protocol
+from typing import Any, Protocol
 
 
 class Condition(StrEnum):
@@ -50,22 +50,23 @@ class ResaleDemand(StrEnum):
         return cls.WEAK if (text or "").strip().lower() == cls.WEAK else cls.TYPICAL
 
 
-class ListingType(StrEnum):
-    GIVEAWAY = "giveaway"
-    LOAN = "loan"
-
-
 @dataclass(frozen=True)
 class Listing:
-    """What an appraiser gets to see: the item as its owner posted it on Meutch."""
+    """What an appraiser gets to see: an item as its owner described it.
+
+    `item_id` is yours to round-trip; appraisers never see it.
+    """
 
     name: str
     description: str = ""
-    category: str = ""
-    tags: tuple[str, ...] = ()
-    listing_type: ListingType = ListingType.LOAN
     image_urls: tuple[str, ...] = ()
     item_id: str | None = None
+
+    def __post_init__(self):
+        # Accept any iterable of URLs, but store a tuple so the listing stays hashable.
+        if isinstance(self.image_urls, str):
+            raise TypeError("image_urls must be a sequence of URLs, not one string")
+        object.__setattr__(self, "image_urls", tuple(self.image_urls))
 
 
 @dataclass(frozen=True)
@@ -86,10 +87,41 @@ class Appraisal:
     model_version: str = ""
     estimated_at: datetime | None = None
     currency: str = "USD"
-    # How the new price was reached, when the appraiser counted units. Scored in
-    # evaluation only; Meutch stores just the total.
+    # How the new price was reached, when the appraiser counted units.
     quantity: int | None = None
     unit_new_price_usd: float | None = None
+
+    @property
+    def buy_value_usd(self) -> float:
+        """What the item would cost to buy in its current condition, under the value policy."""
+        from item_appraiser import policy
+
+        return policy.appraisal_buy_value(self)
+
+    @property
+    def loan_value_usd(self) -> float:
+        """What borrowing the item once is worth, under the value policy."""
+        from item_appraiser import policy
+
+        return policy.appraisal_loan_value(self)
+
+    def to_dict(self) -> dict[str, Any]:
+        """A JSON-ready dict of every field plus the derived buy and loan values."""
+        result: dict[str, Any] = {}
+        for field in fields(self):
+            value = getattr(self, field.name)
+            if isinstance(value, datetime):
+                value = value.isoformat()
+            elif isinstance(value, StrEnum):
+                value = value.value
+            result[field.name] = value
+        result["buy_value_usd"] = self.buy_value_usd
+        result["loan_value_usd"] = self.loan_value_usd
+        return result
+
+
+class AppraisalError(Exception):
+    """The appraiser gave no usable appraisal for this listing; others may still succeed."""
 
 
 class Appraiser(Protocol):

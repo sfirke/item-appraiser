@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from item_appraiser import dataset
-from item_appraiser.models import Condition, Confidence, ListingType
+from item_appraiser.models import Condition, Confidence
 
 FIXTURE = Path(__file__).parent / "fixtures" / "items.csv"
 
@@ -13,9 +13,8 @@ def test_load_skips_rows_without_a_hand_estimate():
 
 def test_load_parses_listing_and_label():
     drill = dataset.load(FIXTURE)[0]
-    assert drill.listing.tags == ("drill", "power tools")
+    assert drill.category == "Tools & Hardware"
     assert drill.listing.image_urls == ("https://example.com/a.jpg", "https://example.com/b.jpg")
-    assert drill.listing.listing_type == ListingType.LOAN
     assert drill.label.new_price_usd == 150
     assert drill.label.condition == Condition.USED
     assert drill.label.confidence == Confidence.HIGH

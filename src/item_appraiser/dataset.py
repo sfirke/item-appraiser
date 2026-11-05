@@ -1,4 +1,10 @@
-"""Load the hand-valued test set (`data/items_sample.csv`)."""
+"""Load a hand-valued test set (default `data/items_sample.csv`).
+
+The CSV needs `name` and `new_price_usd` columns; `description`, `image_urls`
+(space-separated), `item_id`, `category`, `quantity`, `condition`,
+`resale_demand`, `confidence`, `assumptions`, `method` and `model_version` are
+read when present. Rows with no `new_price_usd` are skipped as not yet valued.
+"""
 
 import csv
 from dataclasses import dataclass
@@ -9,7 +15,6 @@ from item_appraiser.models import (
     Condition,
     Confidence,
     Listing,
-    ListingType,
     ResaleDemand,
 )
 
@@ -20,6 +25,7 @@ DEFAULT_PATH = Path("data/items_sample.csv")
 class LabeledItem:
     listing: Listing
     label: Appraisal
+    category: str = ""  # used only by the category-median baseline
 
 
 def _split(text: str, sep: str) -> tuple[str, ...]:
@@ -35,9 +41,6 @@ def parse_row(row: dict[str, str]) -> LabeledItem | None:
         item_id=row.get("item_id") or None,
         name=row["name"],
         description=row.get("description") or "",
-        category=row.get("category") or "",
-        tags=_split(row.get("tags") or "", "|"),
-        listing_type=ListingType(row.get("listing_type") or "loan"),
         image_urls=_split(row.get("image_urls") or "", " "),
     )
     quantity = (row.get("quantity") or "").strip()
@@ -51,7 +54,7 @@ def parse_row(row: dict[str, str]) -> LabeledItem | None:
         method=row.get("method") or "hand",
         model_version=row.get("model_version") or "",
     )
-    return LabeledItem(listing, label)
+    return LabeledItem(listing, label, category=(row.get("category") or "").strip())
 
 
 def load(path: Path = DEFAULT_PATH) -> list[LabeledItem]:
