@@ -1,11 +1,13 @@
 """Estimate the value and climate impact of household goods being lent and given away.
 
-Typical use, with the `claude` extra installed and ANTHROPIC_API_KEY set (or the
-`deepseek` extra, DEEPSEEK_API_KEY and `DeepSeekAppraiser`)::
+Pick a model provider by constructing its appraiser; there's no default. With
+the `claude` extra installed and ANTHROPIC_API_KEY set, or the `deepseek` extra
+and DEEPSEEK_API_KEY::
 
-    from item_appraiser import ClaudeAppraiser, Listing
+    from item_appraiser import ClaudeAppraiser, DeepSeekAppraiser, Listing
 
     appraiser = ClaudeAppraiser(impacts=["money", "climate"])  # default: money only
+    # or: appraiser = DeepSeekAppraiser(impacts=["money", "climate"])
     appraisal = appraiser.appraise(
         Listing(name="Cordless drill", description="18V, two batteries", image_urls=[url])
     )

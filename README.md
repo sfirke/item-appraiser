@@ -8,23 +8,46 @@ it works on any listing with a name, a description and optional photos.
 
 ## Install
 
+Pick a model provider (see Choosing a model) and install its extra:
+
 ```sh
-pip install 'item-appraiser[claude]'     # Claude, the tested default
-pip install 'item-appraiser[deepseek]'   # or DeepSeek, about an eighth of the cost
+pip install 'item-appraiser[claude]'     # Claude, with an ANTHROPIC_API_KEY
+pip install 'item-appraiser[deepseek]'   # DeepSeek, with a DEEPSEEK_API_KEY
 ```
 
-The core package (data types, value policy, prompt) has no dependencies. The
-`claude` extra adds the Anthropic SDK for `ClaudeAppraiser`; the `deepseek` extra
-adds the OpenAI SDK, which `DeepSeekAppraiser` uses against DeepSeek's
-OpenAI-compatible API. Install both if you like; they're independent.
+The core package (data types, value policy, prompt) has no dependencies and
+can't appraise anything on its own. The `claude` extra adds the Anthropic SDK for
+`ClaudeAppraiser`; the `deepseek` extra adds the OpenAI SDK, which
+`DeepSeekAppraiser` uses against DeepSeek's OpenAI-compatible API. Install both if
+you like; they're independent.
+
+
+## Choosing a model
+
+There's no default: you pick by constructing one appraiser or the other. Both
+send the same prompt and give the same `Appraisal` back, and both have been
+scored against hand-valued items (see Results).
+
+- **Claude Sonnet 5.5** (`ClaudeAppraiser`). The prompt was tuned on it, and it
+  has been scored on 100 items. The model ID is pinned, so its answers don't
+  change underneath you. About $0.003 per item.
+- **DeepSeek V4.1 Flash** (`DeepSeekAppraiser`). It scored better than Sonnet on
+  the 50 held-out items, at about an eighth of the cost ($0.0003 per item), but
+  it has been scored on only those 50. `deepseek-flash` is a name DeepSeek moves
+  to newer models over time, so its answers can change without notice.
+
+Store `model_version` with each appraisal either way, so you can tell later
+which model produced it.
 
 
 ## Usage
 
 ```python
-from item_appraiser import AppraisalError, ClaudeAppraiser, Listing
+from item_appraiser import AppraisalError, ClaudeAppraiser, DeepSeekAppraiser, Listing
 
-appraiser = ClaudeAppraiser()  # reads ANTHROPIC_API_KEY from the environment
+appraiser = ClaudeAppraiser()    # reads ANTHROPIC_API_KEY from the environment
+# or
+appraiser = DeepSeekAppraiser()  # reads DEEPSEEK_API_KEY from the environment
 
 listing = Listing(
     name="Cordless drill",
@@ -47,7 +70,8 @@ appraisal.to_dict()       # every field plus the derived values, ready for JSON 
 For climate impact too, ask for it:
 
 ```python
-appraiser = ClaudeAppraiser(impacts=["money", "climate"])  # or just ["climate"]
+appraiser = ClaudeAppraiser(impacts=["money", "climate"])  # or just ["climate"];
+# DeepSeekAppraiser takes the same impacts
 appraisal = appraiser.appraise(listing)
 
 appraisal.footprint_category  # FootprintCategory.POWER_TOOLS
@@ -64,16 +88,9 @@ emission factors are per dollar; `impacts` decides which derived values
 An `Appraisal` also carries the condition, resale demand, the model's confidence,
 a one-sentence assumption a reviewer can check ("Priced as a DeWalt 20V MAX drill
 kit with two batteries..."), the quantity and unit price where the model counted
-units, and a `model_version` string such as `claude-sonnet-5-5/p4+img+qty` that
-identifies the model, prompt version and settings.
-
-With a DeepSeek API key instead, swap the appraiser; everything else is the same:
-
-```python
-from item_appraiser import DeepSeekAppraiser
-
-appraiser = DeepSeekAppraiser()  # reads DEEPSEEK_API_KEY from the environment
-```
+units, and a `model_version` string such as `claude-sonnet-5-5/p4+img+qty` or
+`deepseek-flash/p4+img+qty` that identifies the model, prompt version and
+settings.
 
 `ClaudeAppraiser` options:
 
@@ -347,10 +364,12 @@ Takeaways:
   misses are everyday items (a multimeter, a shovel, a booster seat) it called
   "weak" resale where the hand label says "typical", which cuts the buy value to
   well under half.
-- **Claude stays the default for now.** The prompt was tuned on Sonnet, this is
-  one 50-item set and one run, and `deepseek-flash` is a name DeepSeek moves to
-  newer models over time (it served V4.1-Flash-1017 in November 2026). Scoring
-  DeepSeek on the first 50 items as well would show whether its lead holds.
+- **Each has a case, so neither is the default.** Sonnet is the model the
+  prompt was tuned on, scored on 100 items, with a pinned model ID. DeepSeek did
+  better here and costs far less, but this is one 50-item set and one run, and
+  `deepseek-flash` moves to newer models over time (it served V4.1-Flash-1017 in
+  November 2026). Scoring DeepSeek on the first 50 items as well would show
+  whether its lead holds.
 
 
 #### How the prompt was tuned
