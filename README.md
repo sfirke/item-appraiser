@@ -315,63 +315,68 @@ python3 scripts/sample_items.py -n 329 --out data/items_all.csv
 
 ### Results
 
-Settings were tuned on the first 50 hand-valued items, then frozen (Sonnet,
-photos, quantity) and scored on a second, non-overlapping 50-item held-out set
-(`--exclude` in the sampler). About $0.14 per 50 items.
+Both models were scored on the same 50 held-out items, which were never used to
+tune anything, with the same prompt (`p4`) and settings (photos, quantity
+counting, low-effort thinking). See the start of Evaluation for what each
+measure means.
+
+| Held-out 50 items | Better is | Claude Sonnet 5.5 | DeepSeek V4.1 Flash (1017) |
+|---|---|---|---|
+| New price, typical error | lower | 1.37x | **1.30x** |
+| Buy value, typical error | lower | 1.60x | **1.39x** |
+| Buy value, within 25% | higher | 28% | **40%** |
+| Buy value, within 2x | higher | 64% | **78%** |
+| Buy value, total bias | closer to 1.00x | 1.06x | **0.97x** |
+| Loan value, total bias | closer to 1.00x | 1.08x | **0.99x** |
+| Condition accuracy | higher | 94% | 94% |
+| Quantity accuracy | higher | 96% | **98%** |
+| Resale demand, items disagreeing with hand label | lower | 17 | **13** |
+| Cost per item | lower | $0.0026 | **$0.0003** |
+| Model ID | | `claude-sonnet-5-5` | `deepseek-flash` |
+
+Takeaways:
+
+- **DeepSeek Flash did better on this set, at about an eighth of the cost.** Item
+  by item, its buy value was closer to the hand value on 32 items and Sonnet's on
+  12 (6 tied). All 50 of its answers were usable on the first try.
+- **Both are good enough in aggregate.** Summed buy and loan values land within
+  8% of the hand totals, which is what impact figures need.
+- **Neither is precise per item.** A typical estimate is off by about 1.4-1.6x,
+  and a fifth (DeepSeek) to a third (Sonnet) miss by more than 2x.
+- **Resale demand is the weakest field for both.** Most of DeepSeek's large
+  misses are everyday items (a multimeter, a shovel, a booster seat) it called
+  "weak" resale where the hand label says "typical", which cuts the buy value to
+  well under half.
+- **Claude stays the default for now.** The prompt was tuned on Sonnet, this is
+  one 50-item set and one run, and `deepseek-flash` is a name DeepSeek moves to
+  newer models over time (it served V4.1-Flash-1017 in November 2026). Scoring
+  DeepSeek on the first 50 items as well would show whether its lead holds.
+
+
+#### How the prompt was tuned
+
+Settings were tuned with Sonnet 5.5 on the first 50 hand-valued items, then
+frozen and scored on the held-out 50 (a second, non-overlapping sample;
+`--exclude` in the sampler). Sonnet's results across both sets:
+
+| Claude Sonnet 5.5, prompt `p4` | First 50 (tuning) | Held-out 50 | All 100 |
+|---|---|---|---|
+| New price, typical error | 1.26x | 1.37x | 1.33x |
+| Buy value, typical error | 1.47x | 1.60x | 1.50x |
+| Buy value, within 25% | 40% | 28% | 34% |
+| Buy value, within 2x | 80% | 64% | 72% |
+| Buy value, total bias | 0.97x | 1.06x | 1.01x |
+| Loan value, total bias | 1.00x | 1.08x | 1.04x |
+| Condition accuracy | 92% | 94% | 93% |
+| Quantity accuracy | 94% | 96% | 95% |
+
+As expected, scores are a little better on the items used for tuning. Over all
+100, summed values land within 5% of the hand totals. With 50 items per set,
+differences of a few points between columns are within noise.
 
 Prompt `p4` (current) sends the model only the name, description and photos.
-`p3` also sent Meutch's category, tags and listing type; dropping them made no
-difference over all 100 items (total bias 1.01x buy, 1.04x loan both ways;
-typical buy-value error 1.57x for p3, 1.50x for p4), so the input stays generic.
-
-| p4 | first 50 | held-out 50 | all 100 |
-|---|---|---|---|
-| new price, typical error | 1.26x | 1.37x | 1.33x |
-| buy value, typical error | 1.47x | 1.60x | 1.50x |
-| buy value, within 25% | 40% | 28% | 34% |
-| buy value, within 2x | 80% | 64% | 72% |
-| buy value, total bias | 0.97x | 1.06x | 1.01x |
-| loan value, total bias | 1.00x | 1.08x | 1.04x |
-| condition accuracy | 92% | 94% | 93% |
-| quantity accuracy | 94% | 96% | 95% |
-
-For comparison, p3 scored total bias of 1.00x / 1.02x (buy) and 1.02x / 1.05x
+`p3` also sent Meutch's category, tags and listing type. Dropping them made no
+difference over all 100 items (total bias 1.01x buy and 1.04x loan both ways;
+typical buy-value error 1.57x for p3 and 1.50x for p4), so the input stays
+generic. Per set, p3 scored total bias of 1.00x / 1.02x (buy) and 1.02x / 1.05x
 (loan) on the first 50 / held-out 50.
-
-Takeaways: summed values over all 100 items land within 5% of the hand totals,
-which is what impact figures need, though either 50-item set alone can drift a
-few points further (held-out loan value is 1.08x). Individual items are typically
-off by about 1.5x, and only about two thirds to four fifths land within 2x, so
-don't read single estimates as precise. Resale demand is the weakest field (the
-model disagrees with the hand label on about a quarter of items). With 50 items
-per set, differences of a few points between columns are within noise.
-
-
-#### DeepSeek
-
-DeepSeek Flash (`deepseek-flash`, served by DeepSeek-V4.1-Flash-1017 in November
-2026) ran the same frozen `p4` prompt and settings (photos, quantity, low-effort
-thinking) on the held-out 50, for $0.017 in all, about an eighth of Sonnet's cost.
-The prompt was tuned against Sonnet on the first 50, so DeepSeek got no tuning
-of its own.
-
-| held-out 50 | Sonnet | DeepSeek Flash |
-|---|---|---|
-| new price, typical error | 1.37x | 1.30x |
-| buy value, typical error | 1.60x | 1.39x |
-| buy value, within 25% | 28% | 40% |
-| buy value, within 2x | 64% | 78% |
-| buy value, total bias | 1.06x | 0.97x |
-| loan value, total bias | 1.08x | 0.99x |
-| condition accuracy | 94% | 94% |
-| quantity accuracy | 96% | 98% |
-| resale demand mismatches | 17 | 13 |
-| cost per item | $0.0026 | $0.0003 |
-
-Item by item, DeepSeek's buy value was closer to the hand value on 32 items and
-Sonnet's on 12 (6 tied). All 50 DeepSeek answers fit the schema the first time.
-Its largest misses are mostly resale demand rather than price: 12 of its 13
-mismatches mark as "weak" items the hand labels call "typical" (a multimeter, a
-shovel, a booster seat), which cuts their buy value to well under half. This is
-one 50-item set and one run, so it isn't yet enough to switch the default; scoring
-it on the first 50 as well would show whether the lead holds.
