@@ -139,8 +139,13 @@ and recompute with `item_appraiser.new_item_kg_co2e()`, `giveaway_kg_co2e()` and
 
 The categories were drawn up against every listing on Meutch (329 when written),
 not just the hand-valued ones, because Meutch's own categories are too coarse
-("Home & Garden" spans light bulbs, saplings, mowers and furniture). To check
-coverage as listings grow, run the climate prompt over a CSV of all listings and
+("Home & Garden" spans light bulbs, saplings, mowers and furniture). Running
+the climate prompt (Sonnet, `f1`) over all 329, for $1.02, put 4 (1%) in "other"
+(home-brewing gear, a photo green screen, a honey extractor) and 3 tickets, gift
+cards and coupons in the zero-footprint category. Six categories (computers,
+monitors, tablets, TVs, upholstered furniture) had no items yet. Together the
+329 come to about 4,200 kg CO2e new (median 5.4 kg). To
+check coverage as listings grow, run the climate prompt over a CSV of all listings and
 review what lands in "other" (see Evaluation). Anything recurring there is a
 candidate for a new category; bump `FOOTPRINT_VERSION` in `prompt.py` when the
 categories change.
