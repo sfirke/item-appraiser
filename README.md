@@ -141,8 +141,8 @@ The categories were drawn up against every listing on Meutch (329 when written),
 not just the hand-valued ones, because Meutch's own categories are too coarse
 ("Home & Garden" spans light bulbs, saplings, mowers and furniture). Running
 the climate prompt (Sonnet, `f1`) over all 329, for $1.02, put 4 (1%) in "other"
-(home-brewing gear, a photo green screen, a honey extractor) and 3 tickets, gift
-cards and coupons in the zero-footprint category. Six categories (computers,
+(one-off specialty equipment with no common theme) and 3 tickets, gift cards and
+coupons in the zero-footprint category. Six categories (computers,
 monitors, tablets, TVs, upholstered furniture) had no items yet. Together the
 329 come to about 4,200 kg CO2e new (median 5.4 kg). To
 check coverage as listings grow, run the climate prompt over a CSV of all listings and
@@ -200,9 +200,11 @@ To release: bump `version` in `pyproject.toml`, then
 
 `scripts/sample_items.py` draws a seeded random sample of items from a Meutch
 database dump into `data/items_sample.csv`, with blank columns for
-hand-estimated values:
+hand-estimated values. Point it at the gzipped dump with `--dump`, or set
+`ITEM_APPRAISER_DUMP` once:
 
 ```sh
+export ITEM_APPRAISER_DUMP=~/path/to/db_backup.sql.gz
 python3 scripts/sample_items.py            # 50 items, default seed
 python3 scripts/sample_items.py --help     # --dump, --out, --seed, -n, --exclude, --force
 ```
