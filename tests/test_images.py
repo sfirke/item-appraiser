@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from item_appraiser import claude
+from item_appraiser import images
 
 PUBLIC_IP = "93.184.215.14"
 
@@ -18,7 +18,7 @@ def resolve_to(*ips):
 
 @pytest.fixture
 def public_dns(monkeypatch):
-    monkeypatch.setattr(claude.socket, "getaddrinfo", resolve_to(PUBLIC_IP))
+    monkeypatch.setattr(images.socket, "getaddrinfo", resolve_to(PUBLIC_IP))
 
 
 class FakeOpener:
@@ -47,7 +47,7 @@ def use_opener(monkeypatch, opener):
         def __exit__(self, *args):
             return None
 
-    monkeypatch.setattr(claude.urllib.request, "urlopen", Context)
+    monkeypatch.setattr(images.urllib.request, "urlopen", Context)
 
 
 @pytest.mark.parametrize(
@@ -65,27 +65,27 @@ def use_opener(monkeypatch, opener):
     ],
 )
 def test_local_private_and_non_http_urls_are_not_public(url):
-    assert not claude.is_public_url(url)
-    assert not claude.image_is_reachable(url)
+    assert not images.is_public_url(url)
+    assert not images.image_is_reachable(url)
 
 
 def test_a_host_with_any_private_address_is_not_public(monkeypatch):
-    monkeypatch.setattr(claude.socket, "getaddrinfo", resolve_to(PUBLIC_IP, "10.0.0.1"))
-    assert not claude.is_public_url("https://example.com/a.jpg")
+    monkeypatch.setattr(images.socket, "getaddrinfo", resolve_to(PUBLIC_IP, "10.0.0.1"))
+    assert not images.is_public_url("https://example.com/a.jpg")
 
 
 def test_unresolvable_host_is_not_public(monkeypatch):
     def fail(*args, **kwargs):
         raise socket.gaierror("no such host")
 
-    monkeypatch.setattr(claude.socket, "getaddrinfo", fail)
-    assert not claude.is_public_url("https://nope.invalid/a.jpg")
+    monkeypatch.setattr(images.socket, "getaddrinfo", fail)
+    assert not images.is_public_url("https://nope.invalid/a.jpg")
 
 
 def test_public_url_passes_on_a_successful_head(monkeypatch, public_dns):
     opener = FakeOpener(HEAD=200)
     use_opener(monkeypatch, opener)
-    assert claude.image_is_reachable("https://cdn.example.com/a.jpg")
+    assert images.image_is_reachable("https://cdn.example.com/a.jpg")
     method, headers = opener.calls[0]
     assert method == "HEAD"
     assert headers["User-agent"].startswith("item-appraiser/")
@@ -95,7 +95,7 @@ def test_public_url_passes_on_a_successful_head(monkeypatch, public_dns):
 def test_head_refusals_fall_back_to_a_one_byte_get(monkeypatch, public_dns, head_status):
     opener = FakeOpener(HEAD=head_status, GET=206)
     use_opener(monkeypatch, opener)
-    assert claude.image_is_reachable("https://cdn.example.com/a.jpg")
+    assert images.image_is_reachable("https://cdn.example.com/a.jpg")
     assert [method for method, _ in opener.calls] == ["HEAD", "GET"]
     assert opener.calls[1][1]["Range"] == "bytes=0-0"
 
@@ -103,18 +103,18 @@ def test_head_refusals_fall_back_to_a_one_byte_get(monkeypatch, public_dns, head
 def test_missing_image_fails_without_a_get(monkeypatch, public_dns):
     opener = FakeOpener(HEAD=404, GET=200)
     use_opener(monkeypatch, opener)
-    assert not claude.image_is_reachable("https://cdn.example.com/a.jpg")
+    assert not images.image_is_reachable("https://cdn.example.com/a.jpg")
     assert len(opener.calls) == 1
 
 
 def test_fallback_get_failure_fails(monkeypatch, public_dns):
     use_opener(monkeypatch, FakeOpener(HEAD=405, GET=404))
-    assert not claude.image_is_reachable("https://cdn.example.com/a.jpg")
+    assert not images.image_is_reachable("https://cdn.example.com/a.jpg")
 
 
 def test_network_errors_fail(monkeypatch, public_dns):
     def boom(request, timeout):
         raise urllib.error.URLError("connection refused")
 
-    monkeypatch.setattr(claude.urllib.request, "urlopen", boom)
-    assert not claude.image_is_reachable("https://cdn.example.com/a.jpg")
+    monkeypatch.setattr(images.urllib.request, "urlopen", boom)
+    assert not images.image_is_reachable("https://cdn.example.com/a.jpg")

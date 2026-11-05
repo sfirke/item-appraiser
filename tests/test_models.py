@@ -50,6 +50,7 @@ def test_to_dict_is_json_ready_and_includes_derived_values():
     assert data["estimated_at"] == "2026-11-04T00:00:00+00:00"
     assert data["buy_value_usd"] == 32
     assert data["loan_value_usd"] == 16
+    assert data["model_fingerprint"] is None  # set only by providers that report one
 
 
 def test_from_dict_round_trips_to_dict():
@@ -81,6 +82,11 @@ def test_from_dict_round_trips_to_dict():
     assert rebuilt.giveaway_kg_co2e == climate.giveaway_kg_co2e
 
 
+def test_model_fingerprint_round_trips_through_storage():
+    appraisal = Appraisal(10, Condition.USED, fingerprint="abc", model_fingerprint="fp_a")
+    assert Appraisal.from_dict(json.loads(json.dumps(appraisal.to_dict()))) == appraisal
+
+
 def test_from_dict_ignores_derived_and_unknown_keys_and_fills_defaults():
     appraisal = Appraisal.from_dict(
         {"new_price_usd": 100, "condition": "like new", "buy_value_usd": 1, "extra": "x"}
@@ -106,6 +112,7 @@ def test_to_dict_fields_are_stable():
         "footprint_category",
         "impacts",
         "fingerprint",
+        "model_fingerprint",
         "buy_value_usd",
         "loan_value_usd",
     ]

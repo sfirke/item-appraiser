@@ -3,6 +3,7 @@
     python -m item_appraiser.evaluate                      # category-median baseline
     python -m item_appraiser.evaluate --data path/to.csv --worst 10
     python -m item_appraiser.evaluate --appraiser claude --limit 5   # Sonnet, photos
+    python -m item_appraiser.evaluate --appraiser deepseek           # DeepSeek Flash, photos
 
 Errors are measured as ratios (a $5 miss on a $10 item counts the same as a
 $150 miss on a $300 one). Because the end goal is aggregate impact, the report
@@ -17,10 +18,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from statistics import median
 
-from item_appraiser import claude, dataset, policy
+from item_appraiser import claude, dataset, deepseek, policy
 from item_appraiser.baseline import CategoryMedianAppraiser
 from item_appraiser.claude import ClaudeAppraiser
 from item_appraiser.dataset import LabeledItem
+from item_appraiser.deepseek import DeepSeekAppraiser
 from item_appraiser.models import (
     Appraisal,
     AppraisalError,
@@ -32,7 +34,8 @@ from item_appraiser.models import (
     ResaleDemand,
 )
 
-DEFAULT_CACHE_DIR = Path("data/cache/claude")
+# Each LLM appraiser caches under its own name, e.g. data/cache/deepseek.
+DEFAULT_CACHE_ROOT = Path("data/cache")
 
 # Floor for log-ratio errors, so a $0 estimate scores as a large miss rather than infinity.
 MIN_PRICE_USD = 0.01
@@ -273,7 +276,7 @@ def run_category_median(items: Sequence[LabeledItem], args: argparse.Namespace) 
 
 
 def load_dotenv() -> None:
-    """Read ANTHROPIC_API_KEY from a .env file, if python-dotenv is installed."""
+    """Read API keys (ANTHROPIC_API_KEY, DEEPSEEK_API_KEY) from a .env file, if python-dotenv is installed."""
     try:
         import dotenv
     except ImportError:
@@ -281,18 +284,23 @@ def load_dotenv() -> None:
     dotenv.load_dotenv(dotenv.find_dotenv(usecwd=True))
 
 
-def build_claude(args: argparse.Namespace) -> ClaudeAppraiser:
-    return ClaudeAppraiser(
-        model=MODELS[args.model],
+LLMAppraiser = ClaudeAppraiser | DeepSeekAppraiser
+
+
+def build_llm_appraiser(args: argparse.Namespace) -> LLMAppraiser:
+    """The appraiser named by --appraiser, with the command-line settings."""
+    appraiser_class, models = LLM_APPRAISERS[args.appraiser]
+    return appraiser_class(
+        model=models[args.model],
         use_images=not args.no_images,
         use_quantity=not args.no_quantity,
-        cache_dir=args.cache_dir,
+        cache_dir=args.cache_dir or DEFAULT_CACHE_ROOT / args.appraiser,
         impacts=args.impacts,
     )
 
 
 def confirm_api_cost(
-    appraiser: ClaudeAppraiser, listings: Sequence[Listing], args: argparse.Namespace
+    appraiser: LLMAppraiser, listings: Sequence[Listing], args: argparse.Namespace
 ) -> None:
     """Ask before any run that would call the API; --yes skips the question."""
     misses = appraiser.uncached(listings)
@@ -306,22 +314,45 @@ def confirm_api_cost(
         load_dotenv()
 
 
-def cost_notes(appraiser: ClaudeAppraiser, listings: Sequence[Listing], appraised: int) -> str:
+def fingerprint_note(appraisals: Sequence[Appraisal]) -> str:
+    """Which backends answered, for providers whose model name doesn't pin the model.
+
+    More than one fingerprint means the scored answers may come from different
+    models under the same name, e.g. old cached answers mixed with new live ones.
+    """
+    counts = Counter(a.model_fingerprint for a in appraisals if a.model_fingerprint)
+    if not counts:
+        return ""
+    if len(counts) == 1:
+        return f"\nmodel fingerprint: {next(iter(counts))}"
+    lines = [
+        f"\nWARNING: answers came from {len(counts)} model fingerprints, so this run may "
+        "mix models. Score them separately (e.g. a fresh --cache-dir) before comparing."
+    ]
+    lines += [f"  {count:>4}  {fingerprint}" for fingerprint, count in counts.most_common()]
+    return "\n".join(lines)
+
+
+def cost_notes(
+    appraiser: LLMAppraiser, listings: Sequence[Listing], appraisals: Sequence[Appraisal]
+) -> str:
     stored = appraiser.stored_cost(listings)
-    per_item = stored / appraised if appraised else 0.0
+    per_item = stored / len(appraisals) if appraisals else 0.0
     return (
         f"model version: {appraiser.model_version}\n"
-        f"cost: ${stored:.4f} for {appraised} stored responses "
+        f"cost: ${stored:.4f} for {len(appraisals)} stored responses "
         f"(${per_item:.5f} per item); this run spent ${appraiser.spent_usd:.4f}"
+        + fingerprint_note(appraisals)
     )
 
 
-def run_claude(items: Sequence[LabeledItem], args: argparse.Namespace) -> Run:
-    appraiser = build_claude(args)
+def run_llm(items: Sequence[LabeledItem], args: argparse.Namespace) -> Run:
+    appraiser = build_llm_appraiser(args)
     listings = [item.listing for item in items]
     confirm_api_cost(appraiser, listings, args)
     predictions, failures = predict_collecting_failures(appraiser, items)
-    return Run(predictions, failures, cost_notes(appraiser, listings, len(predictions)))
+    appraisals = [p.appraisal for p in predictions]
+    return Run(predictions, failures, cost_notes(appraiser, listings, appraisals))
 
 
 def climate_summary(results: Sequence[tuple[Listing, Appraisal]], top: int = 5) -> str:
@@ -359,8 +390,8 @@ def climate_summary(results: Sequence[tuple[Listing, Appraisal]], top: int = 5) 
 def run_unlabeled(args: argparse.Namespace) -> None:
     """Appraise every row of a CSV, valued or not, and print only the climate summary."""
     listings = dataset.load_listings(args.data)[: args.limit]
-    print(f"claude on {len(listings)} listings from {args.data} (unlabeled)\n")
-    appraiser = build_claude(args)
+    print(f"{args.appraiser} on {len(listings)} listings from {args.data} (unlabeled)\n")
+    appraiser = build_llm_appraiser(args)
     confirm_api_cost(appraiser, listings, args)
     results, failures = [], []
     for listing in listings:
@@ -368,7 +399,7 @@ def run_unlabeled(args: argparse.Namespace) -> None:
             results.append((listing, appraiser.appraise(listing)))
         except AppraisalError as e:
             failures.append((listing, str(e)))
-    print(f"{cost_notes(appraiser, listings, len(results))}\n")
+    print(f"{cost_notes(appraiser, listings, [a for _, a in results])}\n")
     print(climate_summary(results, top=args.worst))
     if failures:
         print(f"\n{len(failures)} listings failed:")
@@ -376,7 +407,14 @@ def run_unlabeled(args: argparse.Namespace) -> None:
             print(f"  {listing.name}: {reason}")
 
 
-MODELS = {"haiku": claude.HAIKU, "sonnet": claude.SONNET, "opus": claude.OPUS}
+CLAUDE_MODELS = {"haiku": claude.HAIKU, "sonnet": claude.SONNET, "opus": claude.OPUS}
+DEEPSEEK_MODELS = {"flash": deepseek.FLASH}
+
+# --appraiser name: (class, --model choices); a run with no --model uses the class default.
+LLM_APPRAISERS = {
+    "claude": (ClaudeAppraiser, {None: claude.DEFAULT_MODEL, **CLAUDE_MODELS}),
+    "deepseek": (DeepSeekAppraiser, {None: deepseek.DEFAULT_MODEL, **DEEPSEEK_MODELS}),
+}
 
 
 def parse_impacts(text: str) -> frozenset[Impact]:
@@ -390,7 +428,8 @@ def parse_impacts(text: str) -> frozenset[Impact]:
 
 APPRAISERS: dict[str, Callable[[Sequence[LabeledItem], argparse.Namespace], Run]] = {
     "category-median": run_category_median,
-    "claude": run_claude,
+    "claude": run_llm,
+    "deepseek": run_llm,
 }
 
 
@@ -400,30 +439,48 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--appraiser", choices=sorted(APPRAISERS), default="category-median")
     parser.add_argument("--worst", type=int, default=5, help="list the N largest disagreements")
     parser.add_argument("--limit", type=int, help="score only the first N items")
-    parser.add_argument("--model", choices=sorted(MODELS), default="sonnet", help="claude only")
-    parser.add_argument("--no-images", action="store_true", help="claude: text only")
     parser.add_argument(
-        "--no-quantity", action="store_true", help="claude: ask for one total, not quantity x unit"
+        "--model",
+        choices=sorted({**CLAUDE_MODELS, **DEEPSEEK_MODELS}),
+        help=f"claude: {', '.join(CLAUDE_MODELS)} (default sonnet); "
+        f"deepseek: {', '.join(DEEPSEEK_MODELS)} (the default)",
     )
-    parser.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
+    parser.add_argument("--no-images", action="store_true", help="claude, deepseek: text only")
+    parser.add_argument(
+        "--no-quantity",
+        action="store_true",
+        help="claude, deepseek: ask for one total, not quantity x unit",
+    )
+    parser.add_argument(
+        "--cache-dir", type=Path, help=f"default {DEFAULT_CACHE_ROOT}/<appraiser name>"
+    )
     parser.add_argument("--yes", action="store_true", help="skip the cost confirmation")
     parser.add_argument(
         "--impacts",
         type=parse_impacts,
         default=frozenset({Impact.MONEY}),
-        help="claude: money, climate, or money,climate (default money)",
+        help="claude, deepseek: money, climate, or money,climate (default money)",
     )
     parser.add_argument(
         "--unlabeled",
         action="store_true",
-        help="claude with climate: appraise every row, valued or not, and print only the "
-        "climate summary (a coverage check, e.g. on a CSV of every listing)",
+        help="claude or deepseek with climate: appraise every row, valued or not, and print "
+        "only the climate summary (a coverage check, e.g. on a CSV of every listing)",
     )
     args = parser.parse_args(argv)
 
+    if args.appraiser in LLM_APPRAISERS:
+        models = LLM_APPRAISERS[args.appraiser][1]
+        if args.model not in models:
+            parser.error(f"--model {args.model} is not a {args.appraiser} model")
+    elif args.model is not None:
+        parser.error(f"--model only applies to {' and '.join(LLM_APPRAISERS)}")
+
     if args.unlabeled:
-        if args.appraiser != "claude" or Impact.CLIMATE not in args.impacts:
-            parser.error("--unlabeled needs --appraiser claude and --impacts including climate")
+        if args.appraiser not in LLM_APPRAISERS or Impact.CLIMATE not in args.impacts:
+            parser.error(
+                "--unlabeled needs --appraiser claude or deepseek, and --impacts including climate"
+            )
         run_unlabeled(args)
         return
 

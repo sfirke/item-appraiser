@@ -16,4 +16,11 @@ First release.
 - Photo URLs that aren't public, or don't load, are left out of the request.
 - Any Claude model can be used; costs are tracked for Haiku, Sonnet and Opus, or
   for any model given a `price`.
-- `item-appraiser-eval` scores an appraiser against a hand-valued CSV.
+- `DeepSeekAppraiser` (the `deepseek` extra, `DEEPSEEK_API_KEY`) sends the same
+  prompt to DeepSeek Flash through DeepSeek's OpenAI-compatible API, checking each
+  answer against the schema since DeepSeek doesn't enforce one. Neither provider
+  is the default. Its appraisals record DeepSeek's `system_fingerprint` as
+  `model_fingerprint`, since the `deepseek-flash` name doesn't pin the model.
+- `item-appraiser-eval` scores an appraiser against a hand-valued CSV
+  (`--appraiser claude` or `deepseek`), and warns when a DeepSeek run's answers
+  came from more than one model fingerprint.

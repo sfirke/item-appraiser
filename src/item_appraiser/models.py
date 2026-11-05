@@ -160,6 +160,12 @@ class Appraisal:
     # Identifies the listing and settings this was estimated from; compare it with
     # the appraiser's `fingerprint(listing)` to tell whether it needs redoing.
     fingerprint: str = ""
+    # Not to be confused with `fingerprint` (our inputs): what the provider reported
+    # about the backend that answered, when the model name alone doesn't pin it
+    # (DeepSeek's system_fingerprint). A new value means the model or its serving
+    # setup changed, so estimates may not be comparable with older ones. None when
+    # the provider pins the model by name (Claude) or reported nothing.
+    model_fingerprint: str | None = None
 
     @property
     def buy_value_usd(self) -> float:

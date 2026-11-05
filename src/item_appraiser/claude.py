@@ -9,12 +9,7 @@ listing text, with structured JSON back. With a `cache_dir`, every usable
 response is stored on disk, so appraising the same listing again costs nothing.
 """
 
-import ipaddress
 import json
-import socket
-import urllib.error
-import urllib.parse
-import urllib.request
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -26,8 +21,8 @@ except ImportError:  # the core package works without it; only this appraiser ne
     anthropic = None
 
 from item_appraiser import prompt
-from item_appraiser._version import __version__
 from item_appraiser.cache import ResponseCache, digest
+from item_appraiser.images import image_is_reachable
 from item_appraiser.models import MONEY_ONLY, Appraisal, AppraisalError, Impact, Listing
 
 HAIKU = "claude-haiku-5-5"
@@ -61,58 +56,6 @@ PRICES = {
 ESTIMATED_CHARS_PER_TOKEN = 3
 ESTIMATED_TOKENS_PER_IMAGE = 650  # the largest photos in the test set come to about 640
 ESTIMATED_OUTPUT_TOKENS = 400  # the JSON plus low-effort thinking
-
-
-IMAGE_CHECK_TIMEOUT_SECONDS = 10
-USER_AGENT = f"item-appraiser/{__version__} (+https://github.com/sfirke/item-appraiser)"
-
-
-def is_public_url(url: str) -> bool:
-    """Whether `url` is http(s) on a host that resolves only to public addresses.
-
-    The API fetches photos from Anthropic's servers, so a localhost or private-network
-    URL (a dev server, an internal bucket) can never work and would fail the request.
-    """
-    parsed = urllib.parse.urlsplit(url)
-    if parsed.scheme not in ("http", "https") or not parsed.hostname:
-        return False
-    try:
-        addresses = socket.getaddrinfo(parsed.hostname, parsed.port or None)
-    except (OSError, UnicodeError, ValueError):
-        return False
-    return bool(addresses) and all(
-        ipaddress.ip_address(address[4][0].split("%")[0]).is_global for address in addresses
-    )
-
-
-def _fetch_ok(url: str, method: str) -> bool:
-    headers = {"User-Agent": USER_AGENT}
-    if method == "GET":
-        headers["Range"] = "bytes=0-0"  # just enough to confirm the file is there
-    request = urllib.request.Request(url, method=method, headers=headers)
-    with urllib.request.urlopen(request, timeout=IMAGE_CHECK_TIMEOUT_SECONDS) as response:
-        return 200 <= response.status < 300
-
-
-def image_is_reachable(url: str) -> bool:
-    """The API fetches photo URLs itself and fails the whole request on a dead one.
-
-    Checks that the URL is public, then sends a HEAD request, falling back to a
-    one-byte GET for servers that don't allow HEAD.
-    """
-    if not is_public_url(url):
-        return False
-    try:
-        return _fetch_ok(url, "HEAD")
-    except urllib.error.HTTPError as e:
-        if e.code not in (403, 405, 501):  # some servers and signed URLs refuse only HEAD
-            return False
-    except (OSError, ValueError):
-        return False
-    try:
-        return _fetch_ok(url, "GET")
-    except (OSError, ValueError):
-        return False
 
 
 def response_text(response: dict) -> str:

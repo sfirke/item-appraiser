@@ -10,7 +10,7 @@ readme = "README.md"
 license = "AGPL-3.0-or-later"
 license-files = ["LICENSE"]
 authors = [{ name = "Sam Firke", email = "samuel.firke@gmail.com" }]
-keywords = ["appraisal", "valuation", "secondhand", "lending", "llm", "claude"]
+keywords = ["appraisal", "valuation", "secondhand", "lending", "llm", "claude", "deepseek"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -29,9 +29,10 @@ dependencies = []
 
 [project.optional-dependencies]
 claude = ["anthropic>=2.3"]
+deepseek = ["openai>=3"]
 
 # Local-only tooling; not published as an extra. Install with:
-#   pip install -e '.[claude]' --group dev
+#   pip install -e '.[claude,deepseek]' --group dev
 [dependency-groups]
 dev = ["python-dotenv", "pytest", "ruff", "build", "twine"]
 

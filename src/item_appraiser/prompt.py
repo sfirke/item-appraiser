@@ -3,13 +3,16 @@
 An appraiser for any model that supports structured (JSON schema) output sends
 `system_prompt()` as the system prompt, the listing's photos followed by
 `listing_text()` as the user message, asks for output matching `output_schema()`,
-and turns the parsed JSON into an `Appraisal` with `parse_output()`.
+and turns the parsed JSON into an `Appraisal` with `parse_output()`. A model with
+a JSON mode that doesn't enforce a schema gets `json_instructions()` appended to
+the system prompt, and its output checked with `validate_output()` first.
 
 Each function takes the `impacts` requested. With money only (the default) the
 prompt and schema are exactly the tested `p4`; adding climate appends a footprint
 category to both.
 """
 
+import json
 from collections.abc import Iterable
 
 from item_appraiser.models import (
@@ -116,6 +119,40 @@ def output_schema(use_quantity: bool = True, impacts: Iterable[Impact | str] = M
         "required": list(properties),
         "additionalProperties": False,
     }
+
+
+PROMPT_JSON = """\
+
+Output. Reply with one JSON object and nothing else. It must match this JSON schema exactly: every key present, no other keys, and the listed strings spelled exactly as given.
+"""
+
+
+def json_instructions(schema: dict) -> str:
+    """Text appended to the system prompt for models with a JSON mode but no schema enforcement."""
+    return PROMPT_JSON + json.dumps(schema) + "\n"
+
+
+def validate_output(output: object, schema: dict) -> None:
+    """Check output against `output_schema()`, for models that don't enforce the schema.
+
+    Raises ValueError naming the first problem. Covers only what `output_schema()`
+    uses: an object of required string, integer and number fields, some with enums.
+    """
+    if not isinstance(output, dict):
+        raise ValueError(f"expected a JSON object, got {type(output).__name__}")
+    properties = schema["properties"]
+    if missing := [key for key in schema["required"] if key not in output]:
+        raise ValueError(f"missing {', '.join(missing)}")
+    if extra := [key for key in output if key not in properties]:
+        raise ValueError(f"unexpected {', '.join(extra)}")
+    types = {"string": (str,), "integer": (int,), "number": (int, float)}
+    for key, value in output.items():
+        spec = properties[key]
+        # bool is an int subclass in Python but never a JSON number.
+        if isinstance(value, bool) or not isinstance(value, types[spec["type"]]):
+            raise ValueError(f"{key} should be a JSON {spec['type']}, got {value!r}")
+        if "enum" in spec and value not in spec["enum"]:
+            raise ValueError(f"{key} {value!r} is not one of {spec['enum']}")
 
 
 def listing_text(listing: Listing, photos: int) -> str:
