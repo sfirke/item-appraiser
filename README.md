@@ -102,3 +102,29 @@ Any run that would call the API prints a cost estimate and asks first (`--yes`
 skips the question). Responses are cached in `data/cache/claude/`, keyed by the
 listing, model, prompt version and prompt text, so re-scoring costs nothing and
 needs no API key. Photo URLs that no longer load are left out of the request.
+
+
+### Results
+
+Settings were tuned on the first 50 hand-valued items, then frozen (Sonnet,
+photos, quantity, prompt `p3`) and scored once on a second, non-overlapping
+50-item held-out set (`--exclude` in the sampler). About $0.14 per 50 items.
+
+| | first 50 | held-out 50 |
+|---|---|---|
+| new price, typical error | 1.33x | 1.39x |
+| buy value, typical error | 1.52x | 1.67x |
+| buy value, within 25% | 30% | 30% |
+| buy value, within 2x | 78% | 64% |
+| buy value, total bias | 1.00x | 1.02x |
+| loan value, total bias | 1.02x | 1.05x |
+| condition accuracy | 92% | 96% |
+| quantity accuracy | 94% | 96% |
+
+Takeaways: summed values are unbiased on both sets (within 5%), which is what
+impact figures need. Individual items are typically off by about 1.5-1.7x, and
+only about two thirds land within 2x on fresh data, so don't read single
+estimates as precise. Resale demand is the weakest field (the model disagrees
+with the hand label on about a third of items, mostly calling things weak that
+were labeled typical). With 50 items per set, differences of a few points
+between the columns are within noise.
