@@ -5,17 +5,15 @@ from types import SimpleNamespace
 import anthropic
 import pytest
 
-from item_appraiser import claude, dataset, evaluate, policy
-from item_appraiser.claude import AppraisalError, ClaudeAppraiser
-from item_appraiser.models import Condition, Confidence, Listing, ResaleDemand
+from item_appraiser import claude, dataset, evaluate, policy, prompt
+from item_appraiser.claude import ClaudeAppraiser
+from item_appraiser.models import AppraisalError, Condition, Confidence, Listing, ResaleDemand
 
 FIXTURE = Path(__file__).parent / "fixtures" / "items.csv"
 
 LISTING = Listing(
     name="Garden gnome",
     description="Slightly chipped",
-    category="Home & Garden",
-    tags=("garden", "decor"),
     image_urls=("https://example.com/live.jpg", "https://example.com/dead.jpg"),
 )
 OUTPUT = {
@@ -73,7 +71,7 @@ def test_appraisal_multiplies_quantity_by_unit_price(tmp_path):
     assert result.confidence == Confidence.MEDIUM
     assert result.assumptions == OUTPUT["assumption"]
     assert result.method == "claude"
-    assert result.model_version == "claude-haiku-5-5/p3+img+qty"
+    assert result.model_version == "claude-sonnet-5-5/p4+img+qty"
 
 
 def test_appraisal_reads_weak_resale_demand_and_policy_applies_it(tmp_path):
@@ -86,13 +84,15 @@ def test_appraisal_reads_weak_resale_demand_and_policy_applies_it(tmp_path):
 
 def test_no_quantity_arm_reads_a_total_and_asks_for_one(tmp_path):
     client = FakeClient(
-        message({k: v for k, v in OUTPUT.items() if k not in ("quantity", "unit_new_price_usd")}
-                | {"new_price_usd": 40.0})
+        message(
+            {k: v for k, v in OUTPUT.items() if k not in ("quantity", "unit_new_price_usd")}
+            | {"new_price_usd": 40.0}
+        )
     )
     result = appraiser(tmp_path, client, use_quantity=False).appraise(LISTING)
     assert result.new_price_usd == 40
     assert result.quantity is None
-    assert result.model_version == "claude-haiku-5-5/p3+img+total"
+    assert result.model_version == "claude-sonnet-5-5/p4+img+total"
     schema = client.requests[0]["output_config"]["format"]["schema"]
     assert "new_price_usd" in schema["properties"]
     assert "quantity" not in schema["properties"]
@@ -140,7 +140,7 @@ def test_cache_hit_needs_no_client(tmp_path):
 @pytest.mark.parametrize(
     "change",
     [
-        {"model": claude.SONNET},
+        {"model": claude.HAIKU},
         {"use_images": False},
         {"use_quantity": False},
     ],
@@ -159,7 +159,14 @@ def test_changing_the_listing_misses_the_cache(tmp_path):
 
 def test_editing_the_prompt_misses_the_cache(tmp_path, monkeypatch):
     appraiser(tmp_path).appraise(LISTING)
-    monkeypatch.setattr(claude, "PROMPT_INTRO", claude.PROMPT_INTRO + "One more rule.\n")
+    monkeypatch.setattr(prompt, "PROMPT_INTRO", prompt.PROMPT_INTRO + "One more rule.\n")
+    assert appraiser(tmp_path).uncached([LISTING]) == [LISTING]
+
+
+def test_editing_the_listing_text_misses_the_cache(tmp_path, monkeypatch):
+    appraiser(tmp_path).appraise(LISTING)
+    original = prompt.listing_text
+    monkeypatch.setattr(prompt, "listing_text", lambda *a: original(*a) + "\nMore context")
     assert appraiser(tmp_path).uncached([LISTING]) == [LISTING]
 
 
@@ -190,9 +197,7 @@ def test_api_errors_fail_the_item_but_auth_errors_stop_the_run(tmp_path):
     with pytest.raises(AppraisalError):
         appraiser(tmp_path, FakeClient(unreachable)).appraise(LISTING)
 
-    response = SimpleNamespace(
-        request=request, status_code=401, headers={"request-id": "req_test"}
-    )
+    response = SimpleNamespace(request=request, status_code=401, headers={"request-id": "req_test"})
     denied = anthropic.AuthenticationError("bad key", response=response, body=None)
     with pytest.raises(anthropic.AuthenticationError):
         appraiser(tmp_path, FakeClient(denied)).appraise(LISTING)
@@ -201,19 +206,19 @@ def test_api_errors_fail_the_item_but_auth_errors_stop_the_run(tmp_path):
 def test_cost_counts_cache_reads_at_their_own_rate(tmp_path):
     a = appraiser(tmp_path)
     a.appraise(LISTING)
-    expected = (1000 * 0.10 + 200 * 0.50 + 2000 * 0.01) / 1_000_000
+    expected = (1000 * 2.00 + 200 * 10.00 + 2000 * 0.20) / 1_000_000
     assert a.spent_usd == pytest.approx(expected)
     assert a.stored_cost([LISTING]) == pytest.approx(expected)
 
 
 def test_estimate_scales_with_photos_and_model(tmp_path):
-    haiku = appraiser(tmp_path)
-    assert haiku.estimate_cost([LISTING]) > appraiser(tmp_path, use_images=False).estimate_cost(
+    sonnet = appraiser(tmp_path)
+    assert sonnet.estimate_cost([LISTING]) > appraiser(tmp_path, use_images=False).estimate_cost(
         [LISTING]
     )
-    assert appraiser(tmp_path, model=claude.SONNET).estimate_cost(
-        [LISTING]
-    ) == pytest.approx(haiku.estimate_cost([LISTING]) * 20)
+    assert appraiser(tmp_path, model=claude.HAIKU).estimate_cost([LISTING]) == pytest.approx(
+        sonnet.estimate_cost([LISTING]) / 20
+    )
 
 
 def test_unpriced_model_is_rejected(tmp_path):
@@ -222,11 +227,11 @@ def test_unpriced_model_is_rejected(tmp_path):
 
 
 def test_prompts_differ_only_in_the_quantity_section():
-    with_quantity = claude.system_prompt(True)
-    total = claude.system_prompt(False)
+    with_quantity = prompt.system_prompt(True)
+    total = prompt.system_prompt(False)
     assert with_quantity != total
-    assert with_quantity.startswith(claude.PROMPT_INTRO)
-    assert total.endswith(claude.PROMPT_OUTRO)
+    assert with_quantity.startswith(prompt.PROMPT_INTRO)
+    assert total.endswith(prompt.PROMPT_OUTRO)
 
 
 class TestEvaluateMain:
@@ -235,7 +240,7 @@ class TestEvaluateMain:
         client = FakeClient()
         monkeypatch.setattr(claude.anthropic, "Anthropic", lambda: client)
         monkeypatch.setattr(claude, "image_is_reachable", lambda url: True)
-        monkeypatch.setattr(evaluate, "load_dotenv", lambda *a: None)
+        monkeypatch.setattr(evaluate, "load_dotenv", lambda: None)
         return client
 
     def run(self, tmp_path, *extra):
@@ -256,7 +261,7 @@ class TestEvaluateMain:
         self.run(tmp_path, "--yes")
         out = capsys.readouterr().out
         assert "estimated cost" in out
-        assert "claude-haiku-5-5/p3+img+qty" in out
+        assert "claude-sonnet-5-5/p4+img+qty" in out
         assert "per item" in out
         assert "buy, model medium" in out
         assert "quantity accuracy: 0% of 2 (2 overcounted, 0 undercounted)" in out
@@ -302,12 +307,49 @@ def test_labels_carry_resale_demand_defaulting_to_typical():
 
 def test_report_lists_resale_demand_mismatches():
     items = dataset.load(FIXTURE)
-    report = evaluate.score(evaluate.predict_leave_one_out(evaluate.CategoryMedianAppraiser, items))
+    report = evaluate.score(
+        evaluate.predict_leave_one_out(lambda t: evaluate.CategoryMedianAppraiser(t, {}), items)
+    )
     assert [p.item.listing.item_id for p in report.weak_resale_mismatches] == ["a3"]
     assert "resale demand mismatches: 1" in evaluate.format_report(report)
 
 
 def test_quantity_scoring_skips_unlabeled_items_and_baselines():
     items = dataset.load(FIXTURE)
-    report = evaluate.score(evaluate.predict_leave_one_out(evaluate.CategoryMedianAppraiser, items))
+    report = evaluate.score(
+        evaluate.predict_leave_one_out(lambda t: evaluate.CategoryMedianAppraiser(t, {}), items)
+    )
     assert report.quantity is None
+
+
+def test_without_a_cache_dir_every_appraisal_calls_the_api(tmp_path):
+    client = FakeClient()
+    a = ClaudeAppraiser(client=client, image_check=lambda url: True)
+    a.appraise(LISTING)
+    a.appraise(LISTING)
+    assert len(client.requests) == 2
+    assert a.uncached([LISTING]) == [LISTING]
+    assert a.stored_cost([LISTING]) == 0
+    assert not any(tmp_path.iterdir())
+
+
+def test_listing_text_sends_only_name_photos_and_description():
+    text = prompt.listing_text(LISTING, 2)
+    assert text.splitlines() == [
+        "<listing>",
+        "Name: Garden gnome",
+        "Photos: 2 attached",
+        "Description: Slightly chipped",
+        "</listing>",
+    ]
+
+
+def test_missing_anthropic_package_gives_an_install_hint(monkeypatch):
+    monkeypatch.setattr(claude, "anthropic", None)
+    with pytest.raises(ImportError, match=r"item-appraiser\[claude\]"):
+        ClaudeAppraiser()
+
+
+def test_injected_client_works_without_the_anthropic_package(tmp_path, monkeypatch):
+    monkeypatch.setattr(claude, "anthropic", None)
+    assert appraiser(tmp_path).appraise(LISTING).new_price_usd == 37.5

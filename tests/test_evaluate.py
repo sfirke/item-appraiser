@@ -60,7 +60,7 @@ def test_leave_one_out_never_sees_the_predicted_item():
 
     def build(training):
         seen.append({i.listing.item_id for i in training})
-        return CategoryMedianAppraiser(training)
+        return CategoryMedianAppraiser(training, {})
 
     predictions = evaluate.predict_leave_one_out(build, items)
     for prediction, training_ids in zip(predictions, seen):
@@ -70,7 +70,8 @@ def test_leave_one_out_never_sees_the_predicted_item():
 
 def test_category_median_falls_back_to_overall_median():
     items = dataset.load(FIXTURE)
-    appraiser = CategoryMedianAppraiser(items[:2])  # tools only
+    categories = {i.listing.item_id: i.category for i in items}
+    appraiser = CategoryMedianAppraiser(items[:2], categories)  # tools only
     toy = items[2].listing
     assert appraiser.appraise(toy).new_price_usd == 85  # median of 150 and 20
     assert appraiser.appraise(items[0].listing).condition == Condition.USED

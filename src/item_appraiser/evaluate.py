@@ -2,7 +2,7 @@
 
     python -m item_appraiser.evaluate                      # category-median baseline
     python -m item_appraiser.evaluate --data path/to.csv --worst 10
-    python -m item_appraiser.evaluate --appraiser claude --model haiku --limit 5
+    python -m item_appraiser.evaluate --appraiser claude --limit 5   # Sonnet, photos
 
 Errors are measured as ratios (a $5 miss on a $10 item counts the same as a
 $150 miss on a $300 one). Because the end goal is aggregate impact, the report
@@ -16,13 +16,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from statistics import median
 
-from dotenv import find_dotenv, load_dotenv
-
 from item_appraiser import claude, dataset, policy
 from item_appraiser.baseline import CategoryMedianAppraiser
-from item_appraiser.claude import AppraisalError, ClaudeAppraiser
+from item_appraiser.claude import ClaudeAppraiser
 from item_appraiser.dataset import LabeledItem
-from item_appraiser.models import Appraisal, Appraiser, Confidence, ResaleDemand
+from item_appraiser.models import Appraisal, AppraisalError, Appraiser, Confidence, ResaleDemand
+
+DEFAULT_CACHE_DIR = Path("data/cache/claude")
 
 # Floor for log-ratio errors, so a $0 estimate scores as a large miss rather than infinity.
 MIN_PRICE_USD = 0.01
@@ -256,7 +256,19 @@ def format_report(report: Report) -> str:
 # Each entry maps the full labeled set to predictions. Appraisers that learn from
 # labels must be scored leave-one-out so they never see the item they predict.
 def run_category_median(items: Sequence[LabeledItem], args: argparse.Namespace) -> Run:
-    return Run(predict_leave_one_out(CategoryMedianAppraiser, items))
+    categories = {item.listing.item_id: item.category for item in items}
+    return Run(
+        predict_leave_one_out(lambda train: CategoryMedianAppraiser(train, categories), items)
+    )
+
+
+def load_dotenv() -> None:
+    """Read ANTHROPIC_API_KEY from a .env file, if python-dotenv is installed."""
+    try:
+        import dotenv
+    except ImportError:
+        return
+    dotenv.load_dotenv(dotenv.find_dotenv(usecwd=True))
 
 
 def run_claude(items: Sequence[LabeledItem], args: argparse.Namespace) -> Run:
@@ -275,7 +287,7 @@ def run_claude(items: Sequence[LabeledItem], args: argparse.Namespace) -> Run:
         )
         if not args.yes and input("Proceed? [y/N] ").strip().lower() != "y":
             raise SystemExit("Stopped; nothing was sent to the API.")
-        load_dotenv(find_dotenv(usecwd=True))
+        load_dotenv()
     predictions, failures = predict_collecting_failures(appraiser, items)
     stored = appraiser.stored_cost(listings)
     per_item = stored / len(predictions) if predictions else 0.0
@@ -301,12 +313,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--appraiser", choices=sorted(APPRAISERS), default="category-median")
     parser.add_argument("--worst", type=int, default=5, help="list the N largest disagreements")
     parser.add_argument("--limit", type=int, help="score only the first N items")
-    parser.add_argument("--model", choices=sorted(MODELS), default="haiku", help="claude only")
+    parser.add_argument("--model", choices=sorted(MODELS), default="sonnet", help="claude only")
     parser.add_argument("--no-images", action="store_true", help="claude: text only")
     parser.add_argument(
         "--no-quantity", action="store_true", help="claude: ask for one total, not quantity x unit"
     )
-    parser.add_argument("--cache-dir", type=Path, default=claude.DEFAULT_CACHE_DIR)
+    parser.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
     parser.add_argument("--yes", action="store_true", help="skip the cost confirmation")
     args = parser.parse_args(argv)
 
