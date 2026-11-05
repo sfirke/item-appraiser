@@ -1,6 +1,7 @@
 """Estimate the value and climate impact of household goods being lent and given away.
 
-Typical use, with the `claude` extra installed and ANTHROPIC_API_KEY set::
+Typical use, with the `claude` extra installed and ANTHROPIC_API_KEY set (or the
+`deepseek` extra, DEEPSEEK_API_KEY and `DeepSeekAppraiser`)::
 
     from item_appraiser import ClaudeAppraiser, Listing
 
@@ -14,6 +15,7 @@ Typical use, with the `claude` extra installed and ANTHROPIC_API_KEY set::
 
 from item_appraiser.claude import ClaudeAppraiser
 from item_appraiser.climate import giveaway_kg_co2e, loan_kg_co2e, new_item_kg_co2e
+from item_appraiser.deepseek import DeepSeekAppraiser
 from item_appraiser.models import (
     Appraisal,
     AppraisalError,
@@ -34,6 +36,7 @@ __all__ = [
     "ClaudeAppraiser",
     "Condition",
     "Confidence",
+    "DeepSeekAppraiser",
     "FootprintCategory",
     "Impact",
     "Listing",

@@ -9,12 +9,14 @@ it works on any listing with a name, a description and optional photos.
 ## Install
 
 ```sh
-pip install 'item-appraiser[claude]'
+pip install 'item-appraiser[claude]'     # Claude, the tested default
+pip install 'item-appraiser[deepseek]'   # or DeepSeek, about an eighth of the cost
 ```
 
 The core package (data types, value policy, prompt) has no dependencies. The
-`claude` extra adds the Anthropic SDK for `ClaudeAppraiser`, the only appraiser
-so far.
+`claude` extra adds the Anthropic SDK for `ClaudeAppraiser`; the `deepseek` extra
+adds the OpenAI SDK, which `DeepSeekAppraiser` uses against DeepSeek's
+OpenAI-compatible API. Install both if you like; they're independent.
 
 
 ## Usage
@@ -65,6 +67,14 @@ kit with two batteries..."), the quantity and unit price where the model counted
 units, and a `model_version` string such as `claude-sonnet-5-5/p4+img+qty` that
 identifies the model, prompt version and settings.
 
+With a DeepSeek API key instead, swap the appraiser; everything else is the same:
+
+```python
+from item_appraiser import DeepSeekAppraiser
+
+appraiser = DeepSeekAppraiser()  # reads DEEPSEEK_API_KEY from the environment
+```
+
 `ClaudeAppraiser` options:
 
 - `model`: defaults to Sonnet, the tested setting. `item_appraiser.claude.HAIKU`
@@ -78,11 +88,22 @@ identifies the model, prompt version and settings.
 - `impacts`: `"money"`, `"climate"`, or both; defaults to money. With climate,
   `model_version` gains a suffix such as `+co2-f1`.
 
-Each call costs about $0.003 with Sonnet. `appraiser.spent_usd` totals what an
-appraiser has spent, and `appraiser.estimate_cost(listings)` gives an upper-end
-estimate before running a batch. Photo URLs that don't load are left out of the
-request rather than failing it. Authentication errors propagate as Anthropic SDK
-exceptions.
+`DeepSeekAppraiser` takes the same options, except:
+
+- `model`: `deepseek-flash` (`item_appraiser.deepseek.FLASH`), the only DeepSeek
+  model that reads photos. DeepSeek points that name at newer model versions
+  over time, so `model_version` (`deepseek-flash/p4+img+qty`) doesn't pin the
+  exact model the way a Claude model ID does.
+- `client`: a configured `openai.OpenAI` client with `base_url` set to
+  `https://api.deepseek.com`. Without one, the appraiser builds its own from
+  `DEEPSEEK_API_KEY`, and never falls back to `OPENAI_API_KEY`.
+
+Each call costs about $0.003 with Sonnet and $0.0003 with DeepSeek Flash
+(DeepSeek bills half price outside its peak hours, 01:00-04:00 and 06:00-10:00 UTC
+on weekdays). `appraiser.spent_usd` totals what an appraiser has spent, and
+`appraiser.estimate_cost(listings)` gives an upper-end estimate before running a
+batch. Photo URLs that don't load are left out of the request rather than
+failing it. Authentication errors propagate as the provider SDK's exceptions.
 
 
 ## How values are derived
@@ -171,17 +192,21 @@ categories change.
 
 ## Other models
 
-Only Claude is implemented and tested, but nothing outside `claude.py` depends on
-it. The prompt, the output JSON schema and the parsing of the model's answer live
-in `item_appraiser.prompt`, and the on-disk response cache in
-`item_appraiser.cache`. An appraiser for another model with structured output
-would send `prompt.system_prompt()` as the system prompt, the photos plus
+Claude and DeepSeek are implemented and scored (see Results). Neither depends on
+the other: the prompt, the output JSON schema and the parsing of the model's
+answer live in `item_appraiser.prompt`, and the on-disk response cache in
+`item_appraiser.cache`. An appraiser for another model would send
+`prompt.system_prompt()` as the system prompt, the photos plus
 `prompt.listing_text()` as the user message, request `prompt.output_schema()`, and
 pass the parsed JSON to `prompt.parse_output()`, giving each the same `impacts`
-to add the footprint category. Anything with an
-`appraise(listing) -> Appraisal` method fits the `Appraiser` protocol and can be
-scored with the evaluation harness below. A different model would need its own
-run against the hand-valued sets before its values are trusted.
+to add the footprint category. A model whose API enforces a JSON schema (Claude)
+needs nothing more. One with only a JSON mode (DeepSeek) gets
+`prompt.json_instructions()` appended to the system prompt and its answer checked
+with `prompt.validate_output()`; `deepseek.py` is the example to copy for any
+OpenAI-compatible API. Anything with an `appraise(listing) -> Appraisal` method
+fits the `Appraiser` protocol and can be scored with the evaluation harness
+below. A different model would need its own run against the hand-valued sets
+before its values are trusted.
 
 
 ## Development
@@ -259,9 +284,17 @@ To score Claude, put `ANTHROPIC_API_KEY` in `.env`, then:
 .venv/bin/python -m item_appraiser.evaluate --appraiser claude --no-quantity
 ```
 
+To score DeepSeek, put `DEEPSEEK_API_KEY` in `.env`; the same options apply:
+
+```sh
+.venv/bin/python -m item_appraiser.evaluate --appraiser deepseek --limit 5   # Flash, photos
+.venv/bin/python -m item_appraiser.evaluate --appraiser deepseek --data data/items_heldout.csv
+```
+
 Any run that would call the API prints a cost estimate and asks first (`--yes`
-skips the question). Responses are cached in `data/cache/claude/`, so re-scoring
-costs nothing and needs no API key.
+skips the question). Responses are cached in `data/cache/claude/` or
+`data/cache/deepseek/` (`--cache-dir` to change it), so re-scoring costs nothing
+and needs no API key.
 
 `--impacts money,climate` adds an unscored climate summary after the report:
 totals, how many items fell in each footprint category, every item in "other"
@@ -269,7 +302,8 @@ or the zero-footprint category, and the largest footprints with the model's
 assumption. There are no hand labels for climate, so this is for eyeballing.
 
 To check category coverage across every listing, not just the hand-valued ones,
-draw them all (the sampler with `-n` set to the total) and run `--unlabeled`,
+draw them all (the sampler with `-n` set to the total) and run `--unlabeled`
+(with either LLM appraiser),
 which appraises every row and prints only the climate summary:
 
 ```sh
@@ -311,3 +345,33 @@ off by about 1.5x, and only about two thirds to four fifths land within 2x, so
 don't read single estimates as precise. Resale demand is the weakest field (the
 model disagrees with the hand label on about a quarter of items). With 50 items
 per set, differences of a few points between columns are within noise.
+
+
+#### DeepSeek
+
+DeepSeek Flash (`deepseek-flash`, served by DeepSeek-V4.1-Flash-1017 in November
+2026) ran the same frozen `p4` prompt and settings (photos, quantity, low-effort
+thinking) on the held-out 50, for $0.017 in all, about an eighth of Sonnet's cost.
+The prompt was tuned against Sonnet on the first 50, so DeepSeek got no tuning
+of its own.
+
+| held-out 50 | Sonnet | DeepSeek Flash |
+|---|---|---|
+| new price, typical error | 1.37x | 1.30x |
+| buy value, typical error | 1.60x | 1.39x |
+| buy value, within 25% | 28% | 40% |
+| buy value, within 2x | 64% | 78% |
+| buy value, total bias | 1.06x | 0.97x |
+| loan value, total bias | 1.08x | 0.99x |
+| condition accuracy | 94% | 94% |
+| quantity accuracy | 96% | 98% |
+| resale demand mismatches | 17 | 13 |
+| cost per item | $0.0026 | $0.0003 |
+
+Item by item, DeepSeek's buy value was closer to the hand value on 32 items and
+Sonnet's on 12 (6 tied). All 50 DeepSeek answers fit the schema the first time.
+Its largest misses are mostly resale demand rather than price: 12 of its 13
+mismatches mark as "weak" items the hand labels call "typical" (a multimeter, a
+shovel, a booster seat), which cuts their buy value to well under half. This is
+one 50-item set and one run, so it isn't yet enough to switch the default; scoring
+it on the first 50 as well would show whether the lead holds.

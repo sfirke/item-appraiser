@@ -10,8 +10,6 @@ response is stored on disk, so appraising the same listing again costs nothing.
 """
 
 import json
-import urllib.error
-import urllib.request
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -24,6 +22,7 @@ except ImportError:  # the core package works without it; only this appraiser ne
 
 from item_appraiser import prompt
 from item_appraiser.cache import ResponseCache
+from item_appraiser.images import image_is_reachable
 from item_appraiser.models import MONEY_ONLY, Appraisal, AppraisalError, Impact, Listing
 
 HAIKU = "claude-haiku-5-5"
@@ -57,16 +56,6 @@ PRICES = {
 ESTIMATED_CHARS_PER_TOKEN = 3
 ESTIMATED_TOKENS_PER_IMAGE = 650  # the largest photos in the test set come to about 640
 ESTIMATED_OUTPUT_TOKENS = 400  # the JSON plus low-effort thinking
-
-
-def image_is_reachable(url: str) -> bool:
-    """The API fetches photo URLs itself and fails the whole request on a dead one."""
-    request = urllib.request.Request(url, method="HEAD")
-    try:
-        with urllib.request.urlopen(request, timeout=10) as response:
-            return response.status == 200
-    except (urllib.error.URLError, TimeoutError):
-        return False
 
 
 def response_text(response: dict) -> str:
