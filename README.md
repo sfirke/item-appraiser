@@ -237,14 +237,14 @@ labels. Store `new_price_usd`, `quantity`, `condition` and `footprint_category`,
 and recompute with `item_appraiser.new_item_kg_co2e()`, `giveaway_kg_co2e()` and
 `loan_kg_co2e()`.
 
-The categories were drawn up against every listing on Meutch (329 when written),
-not just the hand-valued ones, because Meutch's own categories are too coarse
-("Home & Garden" spans light bulbs, saplings, mowers and furniture). Running
-the climate prompt (Sonnet, `f1`) over all 329, for $1.02, put 4 (1%) in "other"
-(one-off specialty equipment with no common theme) and 3 tickets, gift cards and
-coupons in the zero-footprint category. Six categories (computers,
-monitors, tablets, TVs, upholstered furniture) had no items yet. Together the
-329 come to about 4,200 kg CO2e new (median 5.4 kg). To
+The categories are built to cover every listing on Meutch, not just the
+hand-valued ones, because Meutch's own categories are too coarse ("Home &
+Garden" spans light bulbs, saplings, mowers and furniture). Over all 329
+listings, the climate prompt (Sonnet, `f1`, $1.02 in all) puts 4 (1%) in
+"other" (one-off specialty equipment with no common theme) and 3 tickets, gift
+cards and coupons in the zero-footprint category. Six categories (computers,
+monitors, tablets, TVs, upholstered furniture) have no listings so far. Together
+the 329 come to about 4,200 kg CO2e new (median 5.4 kg). To
 check coverage as listings grow, run the climate prompt over a CSV of all listings and
 review what lands in "other" (see Evaluation). Anything recurring there is a
 candidate for a new category; bump `FOOTPRINT_VERSION` in `prompt.py` when the
@@ -450,15 +450,15 @@ Takeaways:
   prompt was tuned on, scored on 100 items, with a pinned model ID. DeepSeek did
   better here and costs far less, but this is one 50-item set and one run, and
   `deepseek-flash` moves to newer models over time (it served V4.1-Flash-1017,
-  fingerprint `bc19ba97cbe016479903222bb1578db6`, in November 2026). Scoring DeepSeek on the first 50 items as well would show
-  whether its lead holds.
+  fingerprint `bc19ba97cbe016479903222bb1578db6`, in November 2026). Scoring
+  DeepSeek on the first 50 items as well would show whether its lead holds.
 
 
-#### How the prompt was tuned
+#### Claude Sonnet 5.5 on both sets
 
-Settings were tuned with Sonnet 5.5 on the first 50 hand-valued items, then
-frozen and scored on the held-out 50 (a second, non-overlapping sample;
-`--exclude` in the sampler). Sonnet's results across both sets:
+The prompt and settings were tuned with Sonnet 5.5 on the first 50 hand-valued
+items. The held-out 50 are a second, non-overlapping sample (`--exclude` in the
+sampler) used only for scoring, so they're the fairer measure.
 
 | Claude Sonnet 5.5, prompt `p4` | First 50 (tuning) | Held-out 50 | All 100 |
 |---|---|---|---|
@@ -471,13 +471,5 @@ frozen and scored on the held-out 50 (a second, non-overlapping sample;
 | Condition accuracy | 92% | 94% | 93% |
 | Quantity accuracy | 94% | 96% | 95% |
 
-As expected, scores are a little better on the items used for tuning. Over all
-100, summed values land within 5% of the hand totals. With 50 items per set,
-differences of a few points between columns are within noise.
-
-Prompt `p4` (current) sends the model only the name, description and photos.
-`p3` also sent Meutch's category, tags and listing type. Dropping them made no
-difference over all 100 items (total bias 1.01x buy and 1.04x loan both ways;
-typical buy-value error 1.57x for p3 and 1.50x for p4), so the input stays
-generic. Per set, p3 scored total bias of 1.00x / 1.02x (buy) and 1.02x / 1.05x
-(loan) on the first 50 / held-out 50.
+Over all 100, summed values land within 5% of the hand totals. With 50 items
+per set, differences of a few points between columns are within noise.
