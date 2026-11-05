@@ -32,17 +32,21 @@ def _split(text: str, sep: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in text.split(sep) if part.strip())
 
 
-def parse_row(row: dict[str, str]) -> LabeledItem | None:
-    """Turn one CSV row into a labeled item, or None if it has no hand estimate yet."""
-    new_price = (row.get("new_price_usd") or "").strip()
-    if not new_price:
-        return None
-    listing = Listing(
+def parse_listing(row: dict[str, str]) -> Listing:
+    return Listing(
         item_id=row.get("item_id") or None,
         name=row["name"],
         description=row.get("description") or "",
         image_urls=_split(row.get("image_urls") or "", " "),
     )
+
+
+def parse_row(row: dict[str, str]) -> LabeledItem | None:
+    """Turn one CSV row into a labeled item, or None if it has no hand estimate yet."""
+    new_price = (row.get("new_price_usd") or "").strip()
+    if not new_price:
+        return None
+    listing = parse_listing(row)
     quantity = (row.get("quantity") or "").strip()
     label = Appraisal(
         new_price_usd=float(new_price),
@@ -61,3 +65,9 @@ def load(path: Path = DEFAULT_PATH) -> list[LabeledItem]:
     with open(path, newline="", encoding="utf-8") as f:
         items = [parse_row(row) for row in csv.DictReader(f)]
     return [item for item in items if item is not None]
+
+
+def load_listings(path: Path = DEFAULT_PATH) -> list[Listing]:
+    """Read every row as a listing, valued or not, e.g. for a climate coverage check."""
+    with open(path, newline="", encoding="utf-8") as f:
+        return [parse_listing(row) for row in csv.DictReader(f)]

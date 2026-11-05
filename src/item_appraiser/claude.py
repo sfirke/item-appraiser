@@ -28,7 +28,7 @@ except ImportError:  # the core package works without it; only this appraiser ne
 from item_appraiser import prompt
 from item_appraiser._version import __version__
 from item_appraiser.cache import ResponseCache, digest
-from item_appraiser.models import Appraisal, AppraisalError, Listing
+from item_appraiser.models import MONEY_ONLY, Appraisal, AppraisalError, Impact, Listing
 
 HAIKU = "claude-haiku-5-5"
 SONNET = "claude-sonnet-5-5"
@@ -136,6 +136,11 @@ def usage_cost(usage: dict, price: Price) -> float:
 class ClaudeAppraiser:
     """Appraise listings with one Claude call each.
 
+    `impacts` chooses what the appraisal is for: "money" (the default, and the
+    tested prompt), "climate", or both. Climate adds a footprint category to the
+    same call; the new price is estimated either way, since most emission factors
+    are per dollar.
+
     `appraise()` raises AppraisalError when the model gives no usable answer for a
     listing, or the API rejects or fails that one request; other listings may
     still succeed. Authentication and permission errors propagate unchanged.
@@ -152,6 +157,7 @@ class ClaudeAppraiser:
         cache_dir: str | PathLike | None = None,
         client: "anthropic.Anthropic | None" = None,
         image_check: Callable[[str], bool] | None = None,
+        impacts: Iterable[Impact | str] = MONEY_ONLY,
         price: Price | None = None,
     ):
         if client is None and anthropic is None:
@@ -162,17 +168,20 @@ class ClaudeAppraiser:
         self.price = price or PRICES.get(model)  # None: costs aren't tracked
         self.use_images = use_images
         self.use_quantity = use_quantity
+        self.impacts = prompt.normalize_impacts(impacts)
         self.cache = ResponseCache(cache_dir) if cache_dir is not None else None
         self.model_version = (
             f"{model}/{prompt.PROMPT_VERSION}"
             f"+{'img' if use_images else 'text'}+{'qty' if use_quantity else 'total'}"
         )
+        if Impact.CLIMATE in self.impacts:
+            self.model_version += f"+co2-{prompt.FOOTPRINT_VERSION}"
         # What this object paid for, including unusable responses; stays 0 without a price.
         self.spent_usd = 0.0
         self._client = client
         self._image_check = image_check or image_is_reachable
-        self._system = prompt.system_prompt(use_quantity)
-        self._schema = prompt.output_schema(use_quantity)
+        self._system = prompt.system_prompt(use_quantity, self.impacts)
+        self._schema = prompt.output_schema(use_quantity, self.impacts)
 
     @property
     def client(self) -> "anthropic.Anthropic":
@@ -187,7 +196,7 @@ class ClaudeAppraiser:
     def _cache_key(self, listing: Listing) -> dict:
         """Everything that shapes the request, so any change to it misses the cache."""
         urls = self._image_urls(listing)
-        return {
+        key = {
             "model": self.model,
             "prompt_version": prompt.PROMPT_VERSION,
             "effort": EFFORT,
@@ -196,6 +205,11 @@ class ClaudeAppraiser:
             "image_urls": list(urls),
             "text": prompt.listing_text(listing, len(urls)),
         }
+        # The system prompt and schema already differ by impact; this is for anyone
+        # reading the key. Money-only keys stay as they were, so old responses still hit.
+        if Impact.CLIMATE in self.impacts:
+            key["footprint_version"] = prompt.FOOTPRINT_VERSION
+        return key
 
     def fingerprint(self, listing: Listing) -> str:
         """Identifies everything a fresh appraisal of `listing` would depend on.
@@ -300,6 +314,7 @@ class ClaudeAppraiser:
             return prompt.parse_output(
                 json.loads(response_text(response)),
                 self.use_quantity,
+                self.impacts,
                 model_version=record["model_version"],
                 estimated_at=datetime.fromisoformat(record["created_at"]),
                 fingerprint=fingerprint,

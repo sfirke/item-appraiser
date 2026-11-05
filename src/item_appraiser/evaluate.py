@@ -11,6 +11,7 @@ also shows total bias: the sum of predicted values over the sum of hand values.
 
 import argparse
 import math
+from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,7 +21,16 @@ from item_appraiser import claude, dataset, policy
 from item_appraiser.baseline import CategoryMedianAppraiser
 from item_appraiser.claude import ClaudeAppraiser
 from item_appraiser.dataset import LabeledItem
-from item_appraiser.models import Appraisal, AppraisalError, Appraiser, Confidence, ResaleDemand
+from item_appraiser.models import (
+    Appraisal,
+    AppraisalError,
+    Appraiser,
+    Confidence,
+    FootprintCategory,
+    Impact,
+    Listing,
+    ResaleDemand,
+)
 
 DEFAULT_CACHE_DIR = Path("data/cache/claude")
 
@@ -271,14 +281,20 @@ def load_dotenv() -> None:
     dotenv.load_dotenv(dotenv.find_dotenv(usecwd=True))
 
 
-def run_claude(items: Sequence[LabeledItem], args: argparse.Namespace) -> Run:
-    appraiser = ClaudeAppraiser(
+def build_claude(args: argparse.Namespace) -> ClaudeAppraiser:
+    return ClaudeAppraiser(
         model=MODELS[args.model],
         use_images=not args.no_images,
         use_quantity=not args.no_quantity,
         cache_dir=args.cache_dir,
+        impacts=args.impacts,
     )
-    listings = [item.listing for item in items]
+
+
+def confirm_api_cost(
+    appraiser: ClaudeAppraiser, listings: Sequence[Listing], args: argparse.Namespace
+) -> None:
+    """Ask before any run that would call the API; --yes skips the question."""
     misses = appraiser.uncached(listings)
     if misses:
         print(
@@ -288,18 +304,89 @@ def run_claude(items: Sequence[LabeledItem], args: argparse.Namespace) -> Run:
         if not args.yes and input("Proceed? [y/N] ").strip().lower() != "y":
             raise SystemExit("Stopped; nothing was sent to the API.")
         load_dotenv()
-    predictions, failures = predict_collecting_failures(appraiser, items)
+
+
+def cost_notes(appraiser: ClaudeAppraiser, listings: Sequence[Listing], appraised: int) -> str:
     stored = appraiser.stored_cost(listings)
-    per_item = stored / len(predictions) if predictions else 0.0
-    notes = (
+    per_item = stored / appraised if appraised else 0.0
+    return (
         f"model version: {appraiser.model_version}\n"
-        f"cost: ${stored:.4f} for {len(predictions)} stored responses "
+        f"cost: ${stored:.4f} for {appraised} stored responses "
         f"(${per_item:.5f} per item); this run spent ${appraiser.spent_usd:.4f}"
     )
-    return Run(predictions, failures, notes)
+
+
+def run_claude(items: Sequence[LabeledItem], args: argparse.Namespace) -> Run:
+    appraiser = build_claude(args)
+    listings = [item.listing for item in items]
+    confirm_api_cost(appraiser, listings, args)
+    predictions, failures = predict_collecting_failures(appraiser, items)
+    return Run(predictions, failures, cost_notes(appraiser, listings, len(predictions)))
+
+
+def climate_summary(results: Sequence[tuple[Listing, Appraisal]], top: int = 5) -> str:
+    """An unscored look at climate estimates: totals, category counts, and what to eyeball.
+
+    There are no hand labels for climate impact, so this checks coverage rather
+    than accuracy: how often the model falls back to "other" (each one is a
+    candidate for a new category) and which items got no footprint at all.
+    """
+    rated = [(listing, a) for listing, a in results if a.footprint_category is not None]
+    if not rated:
+        return "climate: no appraisals have a footprint category"
+    new_kg = [a.new_item_kg_co2e for _, a in rated]
+    lines = [
+        f"climate impact, {len(rated)} items (unscored; no hand labels):",
+        f"  new-item footprint: total {sum(new_kg):,.0f} kg CO2e, median {median(new_kg):.1f} kg",
+        f"  if all given away:  total {sum(a.giveaway_kg_co2e for _, a in rated):,.0f} kg avoided",
+        f"  if each lent once:  total {sum(a.loan_kg_co2e for _, a in rated):,.0f} kg avoided",
+        "\nfootprint categories:",
+    ]
+    counts = Counter(a.footprint_category for _, a in rated)
+    for category, count in counts.most_common():
+        lines.append(f"  {count:>4}  {count / len(rated):>4.0%}  {category}")
+    for category in (FootprintCategory.OTHER, FootprintCategory.NOT_A_PRODUCT):
+        named = [listing.name for listing, a in rated if a.footprint_category == category]
+        if named:
+            lines.append(f'\n"{category}" ({len(named)}): ' + "; ".join(named))
+    lines.append("\nlargest new-item footprints:")
+    for listing, a in sorted(rated, key=lambda r: r[1].new_item_kg_co2e, reverse=True)[:top]:
+        lines.append(f"  {a.new_item_kg_co2e:>7.1f} kg  {a.footprint_category}  {listing.name}")
+        lines.append(f"              model: {describe_appraisal(a)}")
+    return "\n".join(lines)
+
+
+def run_unlabeled(args: argparse.Namespace) -> None:
+    """Appraise every row of a CSV, valued or not, and print only the climate summary."""
+    listings = dataset.load_listings(args.data)[: args.limit]
+    print(f"claude on {len(listings)} listings from {args.data} (unlabeled)\n")
+    appraiser = build_claude(args)
+    confirm_api_cost(appraiser, listings, args)
+    results, failures = [], []
+    for listing in listings:
+        try:
+            results.append((listing, appraiser.appraise(listing)))
+        except AppraisalError as e:
+            failures.append((listing, str(e)))
+    print(f"{cost_notes(appraiser, listings, len(results))}\n")
+    print(climate_summary(results, top=args.worst))
+    if failures:
+        print(f"\n{len(failures)} listings failed:")
+        for listing, reason in failures:
+            print(f"  {listing.name}: {reason}")
 
 
 MODELS = {"haiku": claude.HAIKU, "sonnet": claude.SONNET, "opus": claude.OPUS}
+
+
+def parse_impacts(text: str) -> frozenset[Impact]:
+    try:
+        return frozenset(Impact(part.strip()) for part in text.split(",") if part.strip())
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"{text!r}: use money, climate, or money,climate"
+        ) from None
+
 
 APPRAISERS: dict[str, Callable[[Sequence[LabeledItem], argparse.Namespace], Run]] = {
     "category-median": run_category_median,
@@ -320,7 +407,25 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     parser.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
     parser.add_argument("--yes", action="store_true", help="skip the cost confirmation")
+    parser.add_argument(
+        "--impacts",
+        type=parse_impacts,
+        default=frozenset({Impact.MONEY}),
+        help="claude: money, climate, or money,climate (default money)",
+    )
+    parser.add_argument(
+        "--unlabeled",
+        action="store_true",
+        help="claude with climate: appraise every row, valued or not, and print only the "
+        "climate summary (a coverage check, e.g. on a CSV of every listing)",
+    )
     args = parser.parse_args(argv)
+
+    if args.unlabeled:
+        if args.appraiser != "claude" or Impact.CLIMATE not in args.impacts:
+            parser.error("--unlabeled needs --appraiser claude and --impacts including climate")
+        run_unlabeled(args)
+        return
 
     items = dataset.load(args.data)[: args.limit]
     print(f"{args.appraiser} on {len(items)} hand-valued items from {args.data}\n")
@@ -329,6 +434,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         print(f"{run.notes}\n")
     if run.predictions:
         print(format_report(score(run.predictions, worst=args.worst)))
+        if Impact.CLIMATE in args.impacts:
+            results = [(p.item.listing, p.appraisal) for p in run.predictions]
+            print(f"\n{climate_summary(results, top=args.worst)}")
     if run.failures:
         print(f"\n{len(run.failures)} items failed and are not scored:")
         for failure in run.failures:

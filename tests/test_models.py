@@ -4,7 +4,15 @@ from datetime import UTC, datetime
 import pytest
 
 import item_appraiser
-from item_appraiser import Appraisal, Condition, Confidence, Listing, ResaleDemand
+from item_appraiser import (
+    Appraisal,
+    Condition,
+    Confidence,
+    FootprintCategory,
+    Impact,
+    Listing,
+    ResaleDemand,
+)
 
 
 def test_listing_accepts_a_list_of_urls_and_stays_hashable():
@@ -60,6 +68,18 @@ def test_from_dict_round_trips_to_dict():
     stored = json.loads(json.dumps(appraisal.to_dict()))
     assert Appraisal.from_dict(stored) == appraisal
 
+    climate = Appraisal(
+        100,
+        Condition.NEW,
+        footprint_category=FootprintCategory.TOYS_AND_GAMES,
+        impacts=frozenset({Impact.MONEY, Impact.CLIMATE}),
+    )
+    stored = json.loads(json.dumps(climate.to_dict()))
+    assert "giveaway_kg_co2e" in stored
+    rebuilt = Appraisal.from_dict(stored)
+    assert rebuilt == climate
+    assert rebuilt.giveaway_kg_co2e == climate.giveaway_kg_co2e
+
 
 def test_from_dict_ignores_derived_and_unknown_keys_and_fills_defaults():
     appraisal = Appraisal.from_dict(
@@ -83,6 +103,8 @@ def test_to_dict_fields_are_stable():
         "estimated_at",
         "quantity",
         "unit_new_price_usd",
+        "footprint_category",
+        "impacts",
         "fingerprint",
         "buy_value_usd",
         "loan_value_usd",
@@ -91,6 +113,26 @@ def test_to_dict_fields_are_stable():
 
 def test_package_reports_its_version():
     assert item_appraiser.__version__ == "0.1.0"
+
+
+def test_to_dict_reports_only_the_requested_impacts():
+    both = Appraisal(
+        100,
+        Condition.NEW,
+        footprint_category=FootprintCategory.TOYS_AND_GAMES,
+        impacts=frozenset({Impact.MONEY, Impact.CLIMATE}),
+    )
+    data = json.loads(json.dumps(both.to_dict()))
+    assert data["impacts"] == ["climate", "money"]
+    assert data["footprint_category"] == "toys and games"
+    assert data["buy_value_usd"] == 100
+    assert data["new_item_kg_co2e"] == both.new_item_kg_co2e > 0
+    assert data["giveaway_kg_co2e"] == both.giveaway_kg_co2e
+    assert data["loan_kg_co2e"] == both.loan_kg_co2e
+
+    money = Appraisal(100, Condition.NEW).to_dict()
+    assert money["impacts"] == ["money"]
+    assert "new_item_kg_co2e" not in money
 
 
 def test_public_api_is_importable_from_the_package_root():
