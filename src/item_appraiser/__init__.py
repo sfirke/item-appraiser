@@ -15,10 +15,11 @@ and DEEPSEEK_API_KEY::
     appraisal.new_item_kg_co2e, appraisal.giveaway_kg_co2e, appraisal.loan_kg_co2e
 """
 
+import importlib
+from typing import TYPE_CHECKING
+
 from item_appraiser._version import __version__
-from item_appraiser.claude import ClaudeAppraiser
 from item_appraiser.climate import giveaway_kg_co2e, loan_kg_co2e, new_item_kg_co2e
-from item_appraiser.deepseek import DeepSeekAppraiser
 from item_appraiser.models import (
     Appraisal,
     AppraisalError,
@@ -31,6 +32,30 @@ from item_appraiser.models import (
     ResaleDemand,
 )
 from item_appraiser.policy import buy_value, loan_value
+
+if TYPE_CHECKING:
+    from item_appraiser.claude import ClaudeAppraiser
+    from item_appraiser.deepseek import DeepSeekAppraiser
+
+# The appraisers import their provider SDKs, which are slow to import and large in
+# memory, so they load on first use. Importing the models and policies stays light.
+_LAZY = {
+    "ClaudeAppraiser": "item_appraiser.claude",
+    "DeepSeekAppraiser": "item_appraiser.deepseek",
+}
+
+
+def __getattr__(name: str):
+    if name in _LAZY:
+        value = getattr(importlib.import_module(_LAZY[name]), name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(_LAZY))
+
 
 __all__ = [
     "__version__",

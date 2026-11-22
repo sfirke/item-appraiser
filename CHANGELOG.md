@@ -1,6 +1,14 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.1
+
+- `import item_appraiser` no longer imports the `anthropic` and `openai` SDKs.
+  `ClaudeAppraiser` and `DeepSeekAppraiser` load on first use, so an app that only
+  needs `Appraisal`, the value policy or the climate functions (for example, to
+  compute values from stored appraisals in a web process) stays light. About 95 MB
+  less memory per process with both extras installed.
+
+## 0.1.0
 
 First release.
 

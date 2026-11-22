@@ -1,5 +1,7 @@
 import json
+import tomllib
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -119,7 +121,9 @@ def test_to_dict_fields_are_stable():
 
 
 def test_package_reports_its_version():
-    assert item_appraiser.__version__ == "0.1.0"
+    pyproject = Path(__file__).parent.parent / "pyproject.toml"
+    expected = tomllib.loads(pyproject.read_text())["project"]["version"]
+    assert item_appraiser.__version__ == expected
 
 
 def test_to_dict_reports_only_the_requested_impacts():
