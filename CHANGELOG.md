@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.1
+## 0.1.1 (2026-11-22)
 
 - `import item_appraiser` no longer imports the `anthropic` and `openai` SDKs.
   `ClaudeAppraiser` and `DeepSeekAppraiser` load on first use, so an app that only
