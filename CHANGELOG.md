@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- An `item-appraiser` command appraises one item from the command line, for
+  trying the package out: `item-appraiser "Toilet plunger" -d "used, wooden
+  handle"`. It prints the new price, buy and loan values and climate estimates
+  (or JSON with `--json`), and uses whichever of `ANTHROPIC_API_KEY` and
+  `DEEPSEEK_API_KEY` is set.
+
 ## 0.1.1 (2026-11-22)
 
 - `import item_appraiser` no longer imports the `anthropic` and `openai` SDKs.

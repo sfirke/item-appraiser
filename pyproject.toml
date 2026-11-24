@@ -43,6 +43,7 @@ Issues = "https://github.com/sfirke/item-appraiser/issues"
 Changelog = "https://github.com/sfirke/item-appraiser/blob/main/CHANGELOG.md"
 
 [project.scripts]
+item-appraiser = "item_appraiser.cli:main"
 item-appraiser-eval = "item_appraiser.evaluate:main"
 
 # List what ships explicitly, so local files (.env, data/, caches) never reach PyPI.

@@ -196,6 +196,17 @@ Talking points:
 
 ## 7. Try it yourself
 
+For readers who don't want to write any code (needs the next release, since the
+`item-appraiser` command isn't in 0.1.1 on PyPI):
+
+```sh
+export ANTHROPIC_API_KEY=sk-ant-...       # or DEEPSEEK_API_KEY with [deepseek]
+uvx --from 'item-appraiser[claude]' item-appraiser "Toilet plunger" -d "Wooden handle, used but clean"
+uvx --from 'item-appraiser[claude]' item-appraiser "Old iPhone" -d "iPhone 11, 64 GB, scratched screen"
+```
+
+For readers who want it in Python:
+
 ```sh
 pip install 'item-appraiser[claude]'      # or [deepseek]
 export ANTHROPIC_API_KEY=sk-ant-...       # or DEEPSEEK_API_KEY

@@ -22,6 +22,49 @@ can't appraise anything on its own. The `claude` extra adds the Anthropic SDK fo
 you like; they're independent.
 
 
+## Try it
+
+The package installs an `item-appraiser` command for appraising one item. With
+[uv](https://docs.astral.sh/uv/) there's nothing to install first:
+
+```sh
+export ANTHROPIC_API_KEY=sk-ant-...   # or DEEPSEEK_API_KEY=... and [deepseek] below
+uvx --from 'item-appraiser[claude]' item-appraiser "Toilet plunger"
+```
+
+Or `pip install 'item-appraiser[claude]'` and run `item-appraiser` directly:
+
+```sh
+item-appraiser "Cordless drill" -d "DeWalt 20V, two batteries, used a few times"
+item-appraiser "Road bike" --photo https://example.com/bike.jpg
+item-appraiser "Arrested Development Season 3 DVD box set" --json
+```
+
+```
+Toilet plunger
+  Assumption: Priced as a standard flange plunger with a wooden handle, ...
+
+  New price                 $10.00   used, weak resale demand, high confidence
+  Buy value                  $2.50   what it's worth secondhand
+  Loan value                 $1.25   what borrowing it once is worth
+
+  Footprint new             3.1 kg   CO2e, as plastic household goods
+  Giving it away            1.2 kg   estimated avoided CO2e
+  Lending it once           0.8 kg   estimated avoided CO2e
+```
+
+(Illustrative output; the model's answer will differ.) A description helps:
+brand, model, condition and how many all change the estimate. With only one API
+key set, that provider is used; with both, pass `--provider claude` or
+`--provider deepseek`. `--money-only` skips the climate estimate, `--json`
+prints `to_dict()`, and `--cache-dir DIR` saves answers so asking about the same
+item again is free. Each item costs a fraction of a cent. `item-appraiser --help`
+lists everything.
+
+Single estimates are rough (typically off by about 1.4-1.6x; see Results), so
+treat them as ballpark figures. The method is built for totals across many items.
+
+
 ## Choosing a model
 
 There's no default: you pick by constructing one appraiser or the other. Both

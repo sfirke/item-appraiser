@@ -39,6 +39,10 @@ jobs:
           assert Appraisal(100, Condition.USED).buy_value_usd == 60
           print('core OK', __version__)
           "
+      - name: The command names the missing extra
+        run: |
+          ANTHROPIC_API_KEY=x item-appraiser "Toilet plunger" 2>&1 | tee out.txt || true
+          grep -F "pip install 'item-appraiser[claude]'" out.txt
 
   build:
     runs-on: ubuntu-latest

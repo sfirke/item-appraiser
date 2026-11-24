@@ -36,7 +36,9 @@ def show(appraiser, listing: Listing) -> None:
     a = appraiser.appraise(listing)
     print(f"\n{listing.name}")
     print(f"  Assumption:       {a.assumption}")
-    print(f"  New price:        ${a.new_price_usd:,.2f}  ({a.condition}, {a.resale_demand} resale, {a.confidence} confidence)")
+    print(
+        f"  New price:        ${a.new_price_usd:,.2f}  ({a.condition}, {a.resale_demand} resale, {a.confidence} confidence)"
+    )
     print(f"  Giveaway value:   ${a.buy_value_usd:,.2f}")
     print(f"  Loan value:       ${a.loan_value_usd:,.2f} per loan")
     print(f"  Footprint (new):  {a.new_item_kg_co2e:,.1f} kg CO2e  [{a.footprint_category}]")
@@ -45,7 +47,9 @@ def show(appraiser, listing: Listing) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("name", nargs="?", help="item name (omit to run the examples)")
     parser.add_argument("description", nargs="?", default="", help="item description")
     parser.add_argument("--provider", choices=["claude", "deepseek"], default="claude")
@@ -57,7 +61,9 @@ def main() -> None:
     listings = [Listing(name=args.name, description=args.description)] if args.name else EXAMPLES
     for listing in listings:
         show(appraiser, listing)
-    print(f"\nSpent ${appraiser.spent_usd:.4f} on API calls ({args.provider}; cached answers are free)")
+    print(
+        f"\nSpent ${appraiser.spent_usd:.4f} on API calls ({args.provider}; cached answers are free)"
+    )
 
 
 if __name__ == "__main__":
