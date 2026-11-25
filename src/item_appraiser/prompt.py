@@ -8,12 +8,13 @@ a JSON mode that doesn't enforce a schema gets `json_instructions()` appended to
 the system prompt, and its output checked with `validate_output()` first.
 
 Each function takes the `impacts` requested. With money only (the default) the
-prompt and schema are exactly the tested `p4`; adding climate appends a footprint
+prompt and schema are exactly the tested `p5`; adding climate appends a footprint
 category to both.
 """
 
 import json
 from collections.abc import Iterable
+from datetime import date
 
 from item_appraiser.models import (
     MONEY_ONLY,
@@ -28,9 +29,13 @@ from item_appraiser.models import (
 
 # Bump when the prompt text, listing text or schema changes, so cached responses
 # and stored appraisals can be traced to the prompt that produced them.
-PROMPT_VERSION = "p4"
+PROMPT_VERSION = "p5"
 # Bump when the footprint categories or their prompt text change.
 FOOTPRINT_VERSION = "f1"
+
+# An earlier release year is a mistake, not a device: the first of the devices
+# priced by age (laptops) reached shops in the early 1980s.
+MIN_RELEASE_YEAR = 1980
 
 PROMPT_INTRO = """\
 You estimate values for items on a community lending and giveaway site. For each listing, estimate what it would cost to buy everything offered new, today, in the US, and its condition. Other code turns these into buy and loan values.
@@ -54,7 +59,9 @@ PROMPT_OUTRO = """\
 
 Condition. Use "new" only if it's described as new, unused or unopened, or the photos show original packaging. Use "like new" if it's described as barely used or excellent and the photos show no visible wear. Otherwise use "used", including when you can't tell. Plants, seeds and food are "new" only when sealed retail product.
 
-Resale demand. Use "weak" if this kind of item usually sells secondhand for a small fraction of its new price, such as large furniture, china and tableware, custom-built or dated pieces, and cheap everyday tools, household goods and consumables that people rarely bother to resell. Otherwise use "typical". Judge the kind of item, not its condition, and keep the new price at what it would cost new.
+Resale demand. Use "weak" if this kind of item usually sells secondhand for a small fraction of its new price, such as large furniture, china and tableware, custom-built or dated pieces, and cheap everyday tools, household goods and consumables that people rarely bother to resell. Otherwise use "typical". Judge the kind of item, not its condition, and keep the new price at what it would cost new. Electronics are "weak" only once newer models have superseded them, such as a TV, monitor, printer or sound bar that is several years old, or an accessory made for a device no longer sold; one that is still a current model is "typical".
+
+Release year. Phones, tablets, laptops and smartwatches lose value with age more than with wear, so other code prices them from the year the model came out. If the listing offers one of those four kinds of device, give the year that model was first sold, such as 2019 for a Google Pixel 3a, and make the new price what that model cost when it came out rather than a successor's price. If the model isn't named, estimate the year from the photos and description. Give null for everything else. That includes every other kind of electronics (TVs, monitors, desktop computers, printers, speakers and sound bars, headphones, game consoles, cameras, e-readers, fitness bands), toy and learning versions made for children, and anything that only goes with one of the four, such as a case, charger, keyboard or cable. When you give a year, set resale demand to "typical".
 
 Confidence. "high": the exact product is identifiable and its price is well known. "medium": the category is clear but the price range is wide. "low": you're guessing what the item even is, or the price could easily be off by 2x.
 
@@ -111,6 +118,7 @@ def output_schema(use_quantity: bool = True, impacts: Iterable[Impact | str] = M
         **price_fields,
         "condition": {"type": "string", "enum": [c.value for c in Condition]},
         "resale_demand": {"type": "string", "enum": [r.value for r in ResaleDemand]},
+        "release_year": {"type": ["integer", "null"]},
         "confidence": {"type": "string", "enum": [c.value for c in Confidence]},
     }
     return {
@@ -136,7 +144,8 @@ def validate_output(output: object, schema: dict) -> None:
     """Check output against `output_schema()`, for models that don't enforce the schema.
 
     Raises ValueError naming the first problem. Covers only what `output_schema()`
-    uses: an object of required string, integer and number fields, some with enums.
+    uses: an object of required string, integer and number fields, some with
+    enums and some that may be null.
     """
     if not isinstance(output, dict):
         raise ValueError(f"expected a JSON object, got {type(output).__name__}")
@@ -148,9 +157,14 @@ def validate_output(output: object, schema: dict) -> None:
     types = {"string": (str,), "integer": (int,), "number": (int, float)}
     for key, value in output.items():
         spec = properties[key]
+        # A type is one name, or a list of names when null is also allowed.
+        allowed = [spec["type"]] if isinstance(spec["type"], str) else spec["type"]
+        if value is None and "null" in allowed:
+            continue
+        expected = tuple(t for name in allowed if name != "null" for t in types[name])
         # bool is an int subclass in Python but never a JSON number.
-        if isinstance(value, bool) or not isinstance(value, types[spec["type"]]):
-            raise ValueError(f"{key} should be a JSON {spec['type']}, got {value!r}")
+        if isinstance(value, bool) or not isinstance(value, expected):
+            raise ValueError(f"{key} should be a JSON {' or '.join(allowed)}, got {value!r}")
         if "enum" in spec and value not in spec["enum"]:
             raise ValueError(f"{key} {value!r} is not one of {spec['enum']}")
 
@@ -178,8 +192,8 @@ def parse_output(
 
     `metadata` fills the bookkeeping fields (model_version, estimated_at, fingerprint).
     Raises KeyError, TypeError or ValueError on output that doesn't fit the schema
-    or makes no sense, such as a zero quantity, a negative price or an unknown
-    footprint category.
+    or makes no sense, such as a zero quantity, a negative price, an impossible
+    release year or an unknown footprint category.
     """
     impacts = normalize_impacts(impacts)
     footprint_category = (
@@ -196,10 +210,15 @@ def parse_output(
         new_price = float(output["new_price_usd"])
     if new_price < 0:
         raise ValueError(f"new price {new_price}")
+    release_year = output["release_year"]
+    # A model can be announced for next year, but no later.
+    if release_year is not None and not MIN_RELEASE_YEAR <= release_year <= date.today().year + 1:
+        raise ValueError(f"release year {release_year}")
     return Appraisal(
         new_price_usd=new_price,
         condition=Condition(output["condition"]),
         resale_demand=ResaleDemand(output["resale_demand"]),
+        release_year=release_year,
         confidence=Confidence(output["confidence"]),
         assumption=output["assumption"],
         quantity=quantity,

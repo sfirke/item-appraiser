@@ -62,7 +62,7 @@ def test_from_dict_round_trips_to_dict():
         resale_demand=ResaleDemand.WEAK,
         confidence=Confidence.MEDIUM,
         assumption="Priced as three resin gnomes.",
-        model_version="claude-sonnet-5-5/p4+img+qty",
+        model_version="claude-sonnet-5-5/p5+img+qty",
         estimated_at=datetime(2026, 11, 4, tzinfo=UTC),
         quantity=3,
         unit_new_price_usd=12.5,
@@ -115,6 +115,7 @@ def test_to_dict_fields_are_stable():
         "impacts",
         "fingerprint",
         "model_fingerprint",
+        "release_year",
         "buy_value_usd",
         "loan_value_usd",
     ]
@@ -149,3 +150,17 @@ def test_to_dict_reports_only_the_requested_impacts():
 def test_public_api_is_importable_from_the_package_root():
     for name in item_appraiser.__all__:
         assert hasattr(item_appraiser, name)
+
+
+def test_release_year_round_trips_and_prices_the_item_by_age():
+    appraisal = Appraisal(399, Condition.USED, release_year=2019)
+    stored = json.loads(json.dumps(appraisal.to_dict()))
+    assert stored["release_year"] == 2019
+    assert Appraisal.from_dict(stored) == appraisal
+    assert appraisal.buy_value_usd < Appraisal(399, Condition.USED).buy_value_usd
+
+
+def test_appraisals_stored_before_release_year_load_without_one():
+    stored = Appraisal(100, Condition.USED).to_dict()
+    del stored["release_year"]
+    assert Appraisal.from_dict(stored).release_year is None

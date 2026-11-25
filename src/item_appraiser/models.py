@@ -136,8 +136,9 @@ class Listing:
 class Appraisal:
     """An appraiser's estimate for one listing.
 
-    Appraisers estimate only the new price, condition, resale demand and (for
-    climate impact) footprint category; buy and loan values come from the value
+    Appraisers estimate only the new price, condition, resale demand, release year
+    (for the devices priced by age) and, for climate impact, footprint category;
+    buy and loan values come from the value
     policy (`item_appraiser.policy`) and kg CO2e from the climate policy
     (`item_appraiser.climate`), so either can change without re-appraising anything.
     """
@@ -147,7 +148,7 @@ class Appraisal:
     resale_demand: ResaleDemand = ResaleDemand.TYPICAL
     confidence: Confidence | None = None
     assumption: str = ""  # one short sentence, e.g. "priced as a set of 4 rackets"
-    # What produced the estimate, e.g. "claude-sonnet-5-5/p4+img+qty" or "hand".
+    # What produced the estimate, e.g. "claude-sonnet-5-5/p5+img+qty" or "hand".
     model_version: str = ""
     estimated_at: datetime | None = None
     # How the new price was reached, when the appraiser counted units.
@@ -166,10 +167,13 @@ class Appraisal:
     # setup changed, so estimates may not be comparable with older ones. None when
     # the provider pins the model by name (Claude) or reported nothing.
     model_fingerprint: str | None = None
+    # The year the model was first sold, for phones, tablets, laptops and
+    # smartwatches, which the value policy prices by age; None for everything else.
+    release_year: int | None = None
 
     @property
     def buy_value_usd(self) -> float:
-        """What the item would cost to buy in its current condition, under the value policy."""
+        """What the item would cost to buy today in its current condition, under the value policy."""
         from item_appraiser import policy
 
         return policy.appraisal_buy_value(self)
