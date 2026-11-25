@@ -344,7 +344,7 @@ To release: bump `version` in `pyproject.toml` and date the entry in
 `CHANGELOG.md`, merge to `main`, then tag and push:
 
 ```sh
-git tag v0.1.0 && git push origin v0.1.0
+git tag v0.2.0 && git push origin v0.2.0
 ```
 
 The `Publish` workflow builds the package and uploads it to PyPI with Trusted
@@ -460,65 +460,69 @@ python3 scripts/sample_items.py -n 329 --out data/items_all.csv
 
 ### Results
 
-The tables in this section are for the previous prompt, `p4`; see
-[Prompt `p5`](#prompt-p5-and-the-electronics-set) below for what changed since.
-Both models were scored on the same 50 held-out items, which were never used to
-tune anything, with the same prompt (`p4`) and settings (photos, quantity
-counting, low-effort thinking). See the start of Evaluation for what each
-measure means.
+Both models were scored on the same 50 held-out items with the same prompt
+(`p5`) and settings (photos, quantity counting, low-effort thinking). See the
+start of Evaluation for what each measure means.
 
 | Held-out 50 items | Better is | Claude Sonnet 5.5 | DeepSeek V4.1 Flash (1017) |
 |---|---|---|---|
-| New price, typical error | lower | 1.37x | **1.30x** |
-| Buy value, typical error | lower | 1.60x | **1.39x** |
-| Buy value, within 25% | higher | 28% | **40%** |
-| Buy value, within 2x | higher | 64% | **78%** |
-| Buy value, total bias | closer to 1.00x | 1.06x | **0.97x** |
-| Loan value, total bias | closer to 1.00x | 1.08x | **0.99x** |
-| Condition accuracy | higher | 94% | 94% |
-| Quantity accuracy | higher | 96% | **98%** |
-| Resale demand, items disagreeing with hand label | lower | 17 | **13** |
-| Cost per item | lower | $0.0026 | **$0.0003** |
+| New price, typical error | lower | 1.44x | **1.33x** |
+| Buy value, typical error | lower | **1.50x** | 1.56x |
+| Buy value, within 25% | higher | 28% | **34%** |
+| Buy value, within 2x | higher | 68% | **76%** |
+| Buy value, total bias | closer to 1.00x | **1.01x** | 0.97x |
+| Loan value, total bias | closer to 1.00x | **0.99x** | 0.98x |
+| Condition accuracy | higher | **94%** | 90% |
+| Quantity accuracy | higher | **98%** | 96% |
+| Resale demand, items disagreeing with hand label | lower | 18 | **15** |
+| Cost per item | lower | $0.0028 | **$0.0003** |
 | Model ID | | `claude-sonnet-5-5` | `deepseek-flash` |
 | Model fingerprint | | (pinned by ID) | `bc19ba97…` (all 50 answers) |
 
 Takeaways:
 
-- **DeepSeek Flash did better on this set, at about an eighth of the cost.** Item
-  by item, its buy value was closer to the hand value on 32 items and Sonnet's on
-  12 (6 tied). All 50 of its answers were usable on the first try.
+- **The two are about level, and DeepSeek Flash costs about a tenth as much.**
+  Item by item, its buy value was closer to the hand value on 30 items and
+  Sonnet's on 16 (4 tied), but the summary measures split between them and the
+  gaps are within run-to-run noise (see below). All 50 of its answers were
+  usable.
 - **Both are good enough in aggregate.** Summed buy and loan values land within
-  8% of the hand totals, which is what impact figures need.
-- **Neither is precise per item.** A typical estimate is off by about 1.4-1.6x,
-  and a fifth (DeepSeek) to a third (Sonnet) miss by more than 2x.
-- **Resale demand is the weakest field for both.** Most of DeepSeek's large
-  misses are everyday items (a multimeter, a shovel, a booster seat) it called
-  "weak" resale where the hand label says "typical", which cuts the buy value to
-  well under half.
+  3% of the hand totals, which is what impact figures need.
+- **Neither is precise per item.** A typical estimate is off by 1.5-1.6x, and a
+  quarter (DeepSeek) to a third (Sonnet) miss by more than 2x.
+- **Resale demand is the weakest field for both.** Most of the large misses are
+  everyday items (a multimeter, a tube of grease, a hot glue gun) called "weak"
+  resale where the hand label says "typical", which cuts the buy value to well
+  under half.
 - **Each has a case, so neither is the default.** Sonnet is the model the
-  prompt was tuned on, scored on 100 items, with a pinned model ID. DeepSeek did
-  better here and costs far less, but this is one 50-item set and one run, and
-  `deepseek-flash` moves to newer models over time (it served V4.1-Flash-1017,
-  fingerprint `bc19ba97cbe016479903222bb1578db6`, in November 2026). Scoring
-  DeepSeek on the first 50 items as well would show whether its lead holds.
+  prompt was tuned on, scored on 100 items, with a pinned model ID. DeepSeek
+  costs far less, but this is one 50-item set and one run, and `deepseek-flash`
+  moves to newer models over time (it served V4.1-Flash-1017, fingerprint
+  `bc19ba97cbe016479903222bb1578db6`, in November 2026). Scoring DeepSeek on
+  the first 50 items as well would show how it compares there.
+- **This set doesn't test the age curve.** None of the 50 is a phone, tablet,
+  laptop or smartwatch; the electronics set below covers those. Four of the 50
+  are also in that electronics set, which `p5` was tuned on, so the held-out
+  set is no longer entirely unseen.
 
 
 #### Claude Sonnet 5.5 on both sets
 
-The prompt and settings were tuned with Sonnet 5.5 on the first 50 hand-valued
-items. The held-out 50 are a second, non-overlapping sample (`--exclude` in the
-sampler) used only for scoring, so they're the fairer measure.
+The prompt and settings were first tuned with Sonnet 5.5 on the first 50
+hand-valued items. The held-out 50 are a second, non-overlapping sample
+(`--exclude` in the sampler) used only for scoring, apart from the four items
+noted above, so they're the fairer measure.
 
-| Claude Sonnet 5.5, prompt `p4` | First 50 (tuning) | Held-out 50 | All 100 |
+| Claude Sonnet 5.5, prompt `p5` | First 50 (tuning) | Held-out 50 | All 100 |
 |---|---|---|---|
-| New price, typical error | 1.26x | 1.37x | 1.33x |
-| Buy value, typical error | 1.47x | 1.60x | 1.50x |
-| Buy value, within 25% | 40% | 28% | 34% |
-| Buy value, within 2x | 80% | 64% | 72% |
-| Buy value, total bias | 0.97x | 1.06x | 1.01x |
-| Loan value, total bias | 1.00x | 1.08x | 1.04x |
+| New price, typical error | 1.29x | 1.44x | 1.35x |
+| Buy value, typical error | 1.41x | 1.50x | 1.47x |
+| Buy value, within 25% | 36% | 28% | 32% |
+| Buy value, within 2x | 76% | 68% | 72% |
+| Buy value, total bias | 0.89x | 1.01x | 0.95x |
+| Loan value, total bias | 0.94x | 0.99x | 0.96x |
 | Condition accuracy | 92% | 94% | 93% |
-| Quantity accuracy | 94% | 96% | 95% |
+| Quantity accuracy | 96% | 98% | 97% |
 
 Over all 100, summed values land within 5% of the hand totals. With 50 items
 per set, differences of a few points between columns are within noise.
@@ -541,10 +545,11 @@ item get a release year.
 | Held-out 50, typical error | 1.50x | 1.50x |
 | Held-out 50, total bias | 0.94x | 1.01x |
 
-Both columns were run in November 2026. The `p4` figures for the two 50-item
-sets differ from the tables above, which were run a few weeks earlier with the
-same prompt: that gap (up to 0.1x in typical error and 0.12x in bias) is the
-run-to-run noise to read this table against. By that measure `p5` changes
+Both columns were run in late November 2026. The same `p4` prompt run a few
+weeks earlier scored 1.47x and 0.97x on the first 50 and 1.60x and 1.06x on the
+held-out 50: that gap (up to 0.1x in typical error and 0.12x in bias) is the
+run-to-run noise to read every table in this section against. By that measure
+`p5` changes
 nothing on the general sets, and on electronics it removes about two thirds of
 the overestimate without making the typical item any closer.
 

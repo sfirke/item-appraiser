@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 (unreleased)
+## 0.2.0 (2026-11-25)
 
 Old phones, tablets, laptops and smartwatches are now valued by their age. They
 used to get 60% of a new one's price however old they were.
