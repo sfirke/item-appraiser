@@ -224,7 +224,7 @@ Under the ordinary multipliers a used phone was valued at 60% of the price of
 a new one whatever its age, so a seven-year-old Pixel 3a came out near $300
 when it sells for $40 to $70. The curve was fitted in November 2026 to what 55
 phone, tablet, laptop and smartwatch models released from 2014 to 2025 were
-selling for secondhand (mostly Swappa average sale prices), each as a share of
+selling for secondhand, each as a share of
 its launch price. A plain exponential fits well: the typical model is within
 about 1.25x of the curve. Fitted separately, phones, tablets and laptops lose
 15% to 21% a year, close enough that one curve serves them all. Published trade-in and resale reports show
