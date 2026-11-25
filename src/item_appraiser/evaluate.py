@@ -50,7 +50,7 @@ class Prediction:
     def log_ratio(self) -> float:
         """ln(predicted buy value / hand buy value); positive means overestimated."""
         predicted = max(policy.appraisal_buy_value(self.appraisal), MIN_PRICE_USD)
-        actual = max(policy.appraisal_buy_value(self.item.label), MIN_PRICE_USD)
+        actual = max(self.item.buy_value_usd, MIN_PRICE_USD)
         return math.log(predicted / actual)
 
 
@@ -99,6 +99,7 @@ class Report:
     buy_value_by_model_confidence: dict[Confidence, ErrorStats]
     quantity: QuantityStats | None
     weak_resale_mismatches: list[Prediction]
+    priced_by_age: list[Prediction]
     worst: list[Prediction]
 
 
@@ -166,21 +167,27 @@ def score(predictions: Sequence[Prediction], worst: int = 5) -> Report:
     if not predictions:
         raise ValueError("no predictions to score")
 
-    def stats(preds: Sequence[Prediction], value: Callable[[Appraisal], float]) -> ErrorStats:
-        return ErrorStats.compute([(value(p.appraisal), value(p.item.label)) for p in preds])
+    def buy_stats(preds: Sequence[Prediction]) -> ErrorStats:
+        return ErrorStats.compute(
+            [(policy.appraisal_buy_value(p.appraisal), p.item.buy_value_usd) for p in preds]
+        )
 
     def by_confidence(confidence_of: Callable[[Prediction], Confidence | None]):
         tiers = {}
         for confidence in Confidence:
             tier = [p for p in predictions if confidence_of(p) == confidence]
             if tier:
-                tiers[confidence] = stats(tier, policy.appraisal_buy_value)
+                tiers[confidence] = buy_stats(tier)
         return tiers
 
     return Report(
-        new_price=stats(predictions, lambda a: a.new_price_usd),
-        buy_value=stats(predictions, policy.appraisal_buy_value),
-        loan_value=stats(predictions, policy.appraisal_loan_value),
+        new_price=ErrorStats.compute(
+            [(p.appraisal.new_price_usd, p.item.label.new_price_usd) for p in predictions]
+        ),
+        buy_value=buy_stats(predictions),
+        loan_value=ErrorStats.compute(
+            [(policy.appraisal_loan_value(p.appraisal), p.item.loan_value_usd) for p in predictions]
+        ),
         condition_accuracy=sum(p.appraisal.condition == p.item.label.condition for p in predictions)
         / len(predictions),
         buy_value_by_confidence=by_confidence(lambda p: p.item.label.confidence),
@@ -189,6 +196,7 @@ def score(predictions: Sequence[Prediction], worst: int = 5) -> Report:
         weak_resale_mismatches=[
             p for p in predictions if p.appraisal.resale_demand != p.item.label.resale_demand
         ],
+        priced_by_age=[p for p in predictions if p.appraisal.release_year is not None],
         worst=sorted(predictions, key=lambda p: abs(p.log_ratio), reverse=True)[:worst],
     )
 
@@ -202,7 +210,9 @@ def describe_appraisal(appraisal: Appraisal) -> str:
     else:
         price = f"${appraisal.new_price_usd:.2f}"
     text = f"{price} new, {appraisal.condition}"
-    if appraisal.resale_demand == ResaleDemand.WEAK:
+    if appraisal.release_year is not None:
+        text += f", released {appraisal.release_year}"
+    elif appraisal.resale_demand == ResaleDemand.WEAK:
         text += ", weak resale"
     if appraisal.confidence:
         text += f", {appraisal.confidence} conf."
@@ -251,18 +261,29 @@ def format_report(report: Report) -> str:
                 f"{p.item.listing.name}"
             )
 
+    if report.priced_by_age:
+        lines.append(f"priced by age: {len(report.priced_by_age)}")
+        for p in report.priced_by_age:
+            hand = p.item.release_year if p.item.release_year is not None else "none"
+            lines.append(
+                f"  model {p.appraisal.release_year} vs hand {hand}  {p.item.listing.name}"
+            )
+
     if report.worst:
         lines.append("\nlargest disagreements (buy value, predicted vs hand):")
         for p in report.worst:
             predicted = policy.appraisal_buy_value(p.appraisal)
-            actual = policy.appraisal_buy_value(p.item.label)
+            actual = p.item.buy_value_usd
             lines.append(
                 f"  {math.exp(abs(p.log_ratio)):>5.1f}x  ${predicted:>8.2f} vs ${actual:>8.2f}  "
                 f"{p.item.listing.name}"
             )
             if p.appraisal.assumption:
                 lines.append(f"         model: {describe_appraisal(p.appraisal)}")
-                lines.append(f"         hand:  {describe_appraisal(p.item.label)}")
+                hand = describe_appraisal(p.item.label)
+                if p.item.used_value_usd is not None:
+                    hand = f"${p.item.used_value_usd:.2f} looked up; {hand}"
+                lines.append(f"         hand:  {hand}")
     return "\n".join(lines)
 
 

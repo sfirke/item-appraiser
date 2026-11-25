@@ -88,18 +88,20 @@ tokens, mostly cached). The new price is estimated either way, because most
 emission factors are per dollar; `impacts` decides which derived values
 `to_dict()` reports. Money only, the default, sends exactly the tested prompt.
 
-An `Appraisal` also carries the condition, resale demand, the model's confidence,
+An `Appraisal` also carries the condition, resale demand, the release year for
+devices priced by age (see below), the model's confidence,
 a one-sentence `assumption` a reviewer can check ("Priced as a DeWalt 20V MAX drill
 kit with two batteries..."), the quantity and unit price where the model counted
-units, a `model_version` string such as `claude-sonnet-5-5/p4+img+qty` or
-`deepseek-flash/p4+img+qty` that identifies the model, prompt version and
+units, a `model_version` string such as `claude-sonnet-5-5/p5+img+qty` or
+`deepseek-flash/p5+img+qty` that identifies the model, prompt version and
 settings, a `fingerprint`, and for DeepSeek a `model_fingerprint`.
 
 `to_dict()` gives these keys: `new_price_usd`, `condition`, `resale_demand`,
 `confidence`, `assumption`, `model_version`, `estimated_at` (ISO 8601),
 `quantity`, `unit_new_price_usd`, `footprint_category` (null without climate),
-`impacts` (a sorted list such as `["climate", "money"]`), `fingerprint` and
-`model_fingerprint` (null for Claude), plus
+`impacts` (a sorted list such as `["climate", "money"]`), `fingerprint`,
+`model_fingerprint` (null for Claude) and `release_year` (null unless the item
+is priced by age), plus
 the derived values for the requested impacts: `buy_value_usd` and
 `loan_value_usd` for money, `new_item_kg_co2e`, `giveaway_kg_co2e` and
 `loan_kg_co2e` for climate.
@@ -159,7 +161,7 @@ appraiser = DeepSeekAppraiser(  # the OpenAI SDK's default is also 10 minutes
   tested setting and the only DeepSeek model that reads photos; its price is
   built in. Another DeepSeek model works with `price=item_appraiser.deepseek.Price(...)`
   to track costs, or without. DeepSeek points `deepseek-flash` at newer model versions
-  over time, so `model_version` (`deepseek-flash/p4+img+qty`) doesn't pin the
+  over time, so `model_version` (`deepseek-flash/p5+img+qty`) doesn't pin the
   exact model the way a Claude model ID does. Each appraisal's
   `model_fingerprint` holds the `system_fingerprint` DeepSeek reported for that
   answer. A new value means the model or its serving setup changed, so newer
@@ -187,22 +189,61 @@ server are skipped and the listing is appraised from its text. Pass
 
 ## How values are derived
 
-The appraiser estimates three things: the item's **new price**, its **condition**,
-and its **resale demand**. Everything else comes from a fixed policy in
+The appraiser estimates the item's **new price**, its **condition** and its
+**resale demand**, and for phones, tablets, laptops and smartwatches the
+**release year** of the model. Everything else comes from a fixed policy in
 `src/item_appraiser/policy.py`:
 
 - **Buy value** = new price × condition multiplier (new 1.0, like new 0.8,
   anything else 0.6). Kinds of item that sell for far less secondhand, such as
   large furniture and china, have weak resale demand and lower multipliers
   (new 1.0, like new 0.4, anything else 0.25).
+- **Devices priced by age.** When the appraisal has a release year, buy value =
+  new price × condition multiplier × age factor, where the age factor is
+  1.37 × 0.83^age, capped at 1, and age is the years since the middle of the
+  release year. For a used device that comes to **new price × 0.82 × 0.83^age**
+  once it's about 20 months old: 47% of its new price at three years, 32% at
+  five, 13% at ten. Before that it gets the ordinary multipliers. The value
+  never falls below 5% of the new price, and resale demand plays no part. The
+  new price here is what that model cost when it came out.
 - **Loan value** = half of the first $50 of buy value plus a quarter of
   anything above that, like tax brackets, so a pricier item never lends for
   less. The lower rate on the top slice reflects that expensive items are more
   rentable and less likely to be bought outright.
 
 Keeping the policy out of the appraiser means it can change without
-re-appraising anything: store `new_price_usd`, `condition` and `resale_demand`,
-and recompute values with `item_appraiser.buy_value()` and `loan_value()`.
+re-appraising anything: store `new_price_usd`, `condition`, `resale_demand` and
+`release_year`, and recompute values with `item_appraiser.buy_value()` and
+`loan_value()`. For a device priced by age the value depends on the date, so it
+falls as the device gets older; `buy_value()` takes an `as_of` date (default
+today).
+
+### Where the age curve comes from
+
+Under the ordinary multipliers a used phone was valued at 60% of the price of
+a new one whatever its age, so a seven-year-old Pixel 3a came out near $300
+when it sells for $40 to $70. The curve was fitted in November 2026 to what 55
+phone, tablet, laptop and smartwatch models released from 2014 to 2025 were
+selling for secondhand (mostly Swappa average sale prices), each as a share of
+its launch price. A plain exponential fits well: the typical model is within
+about 1.25x of the curve. Fitted separately, phones, tablets and laptops lose
+15% to 21% a year, close enough that one curve serves them all. Published trade-in and resale reports show
+the same shape, a steep first year and then a steady yearly loss.
+
+Its limits:
+
+- It covers those four kinds of device only. Other electronics in the same
+  data hold value differently (a game console can sell for a quarter of its
+  launch price after 13 years), and for older TVs, monitors, printers and sound
+  bars the prompt asks for weak resale demand instead.
+- The laptop fit rests on five MacBooks and one Chromebook; no usable prices
+  were found for Windows laptops.
+- Nothing in the data is old enough to have reached a floor (a 2014 iPad Air 2
+  still sells at 12% of its launch price), so the 5% floor is a guess.
+- It's a 2026 snapshot. `AGE_VALUE_AT_RELEASE`, `AGE_VALUE_PER_YEAR` and
+  `AGE_VALUE_FLOOR` in `policy.py` are the numbers to refit.
+- It doesn't know about damage. A cracked screen or a failing battery is still
+  just "used".
 
 
 ## How climate impact is derived
@@ -349,6 +390,12 @@ The CSV needs `name` and `new_price_usd` columns, and reads `description`,
 `image_urls` (space-separated), `item_id`, `category`, `quantity`, `condition`,
 `resale_demand` and `confidence` when present.
 
+The hand buy value is normally the label's new price put through the value
+policy. Where a `used_value_usd` column is filled in (what the item would sell
+for as listed, looked up on a resale site), that is the hand buy value instead,
+so the policy itself can be checked. A `release_year` column is shown next to
+the appraiser's year for every item it priced by age.
+
 The report gives, for new price, buy value and loan value:
 
 - **typical error**: the median factor by which estimates miss (1.5x means
@@ -413,6 +460,8 @@ python3 scripts/sample_items.py -n 329 --out data/items_all.csv
 
 ### Results
 
+The tables in this section are for the previous prompt, `p4`; see
+[Prompt `p5`](#prompt-p5-and-the-electronics-set) below for what changed since.
 Both models were scored on the same 50 held-out items, which were never used to
 tune anything, with the same prompt (`p4`) and settings (photos, quantity
 counting, low-effort thinking). See the start of Evaluation for what each
@@ -473,3 +522,43 @@ sampler) used only for scoring, so they're the fairer measure.
 
 Over all 100, summed values land within 5% of the hand totals. With 50 items
 per set, differences of a few points between columns are within noise.
+
+
+#### Prompt `p5` and the electronics set
+
+Prompt `p5` adds the release year for devices priced by age, and asks for weak
+resale demand on electronics that newer models have superseded. It was tuned on
+34 hand-valued electronics listings whose buy values were looked up rather than
+derived from the policy, and on 56 made-up listings that check which kinds of
+item get a release year.
+
+| Claude Sonnet 5.5, buy value | `p4` | `p5` |
+|---|---|---|
+| Electronics (34), typical error | 1.74x | 1.74x |
+| Electronics (34), total bias | 2.17x | 1.42x |
+| First 50, typical error | 1.50x | 1.41x |
+| First 50, total bias | 0.95x | 0.89x |
+| Held-out 50, typical error | 1.50x | 1.50x |
+| Held-out 50, total bias | 0.94x | 1.01x |
+
+Both columns were run in November 2026. The `p4` figures for the two 50-item
+sets differ from the tables above, which were run a few weeks earlier with the
+same prompt: that gap (up to 0.1x in typical error and 0.12x in bias) is the
+run-to-run noise to read this table against. By that measure `p5` changes
+nothing on the general sets, and on electronics it removes about two thirds of
+the overestimate without making the typical item any closer.
+
+- **The three phones in the set** went from $299, $299 and $539 to $82, $174
+  and $330, against hand values of $40, $80 and $150. All three are damaged,
+  which the policy doesn't see; undamaged, the hand values would be about $60,
+  $110 and $299.
+- **The release year goes where it should.** Of the 56 made-up listings, Sonnet
+  gave a year to all 16 phones, tablets, laptops and smartwatches and to one of
+  the 40 other things (an iPod Touch); DeepSeek Flash got all 56 right. In the
+  34 real listings both models gave a year to the three phones and nothing else.
+- **The other 31 electronics** went from 1.60x the hand total to 1.21x, from
+  the weak-resale wording. The largest misses left go both ways: two old
+  printers and a barely used Bluetooth amp valued three to four times too high,
+  and a multimeter, a handheld radio and a keyboard called weak resale and
+  valued at about a third of the hand value.
+

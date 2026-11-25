@@ -29,6 +29,7 @@ OUTPUT = {
     "unit_new_price_usd": 12.5,
     "condition": "used",
     "resale_demand": "typical",
+    "release_year": None,
     "confidence": "medium",
 }
 USAGE = {
@@ -84,7 +85,7 @@ def test_appraisal_multiplies_quantity_by_unit_price(tmp_path):
     assert result.quantity == 3
     assert result.condition == Condition.USED
     assert result.assumption == OUTPUT["assumption"]
-    assert result.model_version == "deepseek-flash/p4+img+qty"
+    assert result.model_version == "deepseek-flash/p5+img+qty"
 
 
 def test_appraisal_carries_the_backend_fingerprint_through_the_cache(tmp_path):
@@ -138,7 +139,7 @@ def test_text_only_and_total_arms(tmp_path):
     )
     result = appraiser(tmp_path, client, use_images=False, use_quantity=False).appraise(LISTING)
     assert result.new_price_usd == 40
-    assert result.model_version == "deepseek-flash/p4+text+total"
+    assert result.model_version == "deepseek-flash/p5+text+total"
     assert [p["type"] for p in client.requests[0]["messages"][1]["content"]] == ["text"]
 
 
@@ -147,7 +148,7 @@ def test_climate_asks_for_and_reads_a_footprint_category(tmp_path):
     result = appraiser(tmp_path, client, impacts=["money", "climate"]).appraise(LISTING)
     assert "footprint_category" in client.requests[0]["messages"][0]["content"]
     assert result.footprint_category == FootprintCategory.PLASTIC_GOODS
-    assert result.model_version == "deepseek-flash/p4+img+qty+co2-f1"
+    assert result.model_version == "deepseek-flash/p5+img+qty+co2-f1"
 
 
 def test_second_appraisal_comes_from_the_cache_without_a_client_or_key(tmp_path, monkeypatch):
@@ -205,11 +206,17 @@ def test_whole_number_float_price_is_accepted(tmp_path):
     assert appraiser(tmp_path, client).appraise(LISTING).new_price_usd == 36
 
 
-REQUEST = SimpleNamespace(method="POST", url="https://api.deepseek.com/chat/completions")
+# The SDK reads the request's headers and the response's redirect history when it
+# builds an error, so the stand-ins carry them.
+REQUEST = SimpleNamespace(
+    method="POST", url="https://api.deepseek.com/chat/completions", headers={}
+)
 
 
 def api_error(cls, status):
-    response = SimpleNamespace(request=REQUEST, status_code=status, headers={})
+    response = SimpleNamespace(
+        request=REQUEST, status_code=status, headers={}, history=[], next_request=None
+    )
     return cls("nope", response=response, body=None)
 
 
@@ -344,7 +351,7 @@ class TestEvaluateMain:
         monkeypatch.chdir(tmp_path)
         self.run("--yes")
         out = capsys.readouterr().out
-        assert "deepseek-flash/p4+img+qty" in out
+        assert "deepseek-flash/p5+img+qty" in out
         assert "buy value" in out
         assert len(fake_api.requests) == 3
         assert len(list((tmp_path / "data" / "cache" / "deepseek").iterdir())) == 3

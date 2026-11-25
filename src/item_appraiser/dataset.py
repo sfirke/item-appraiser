@@ -4,12 +4,17 @@ The CSV needs `name` and `new_price_usd` columns; `description`, `image_urls`
 (space-separated), `item_id`, `category`, `quantity`, `condition`,
 `resale_demand`, `confidence`, `assumption` (or `assumptions`) and
 `model_version` are read when present. Rows with no `new_price_usd` are skipped as not yet valued.
+
+Two more columns are for items whose used value was looked up rather than
+derived: `used_value_usd` is what the item would sell for as listed, and stands
+in for the value policy when scoring; `release_year` is the year the model came out.
 """
 
 import csv
 from dataclasses import dataclass
 from pathlib import Path
 
+from item_appraiser import policy
 from item_appraiser.models import (
     Appraisal,
     Condition,
@@ -26,6 +31,23 @@ class LabeledItem:
     listing: Listing
     label: Appraisal
     category: str = ""  # used only by the category-median baseline
+    # What the item would sell for as listed, looked up by hand; None to derive
+    # the hand value from the label with the value policy.
+    used_value_usd: float | None = None
+    # The year the model came out, by hand. Kept off the label so the policy never
+    # applies the age curve to a hand value: it's for checking the appraiser's year.
+    release_year: int | None = None
+
+    @property
+    def buy_value_usd(self) -> float:
+        """The hand buy value: the looked-up used value, or the policy's from the label."""
+        if self.used_value_usd is not None:
+            return self.used_value_usd
+        return policy.appraisal_buy_value(self.label)
+
+    @property
+    def loan_value_usd(self) -> float:
+        return policy.loan_value(self.buy_value_usd)
 
 
 def _split(text: str, sep: str) -> tuple[str, ...]:
@@ -57,7 +79,15 @@ def parse_row(row: dict[str, str]) -> LabeledItem | None:
         assumption=row.get("assumption") or row.get("assumptions") or "",
         model_version=row.get("model_version") or "hand",
     )
-    return LabeledItem(listing, label, category=(row.get("category") or "").strip())
+    used_value = (row.get("used_value_usd") or "").strip()
+    release_year = (row.get("release_year") or "").strip()
+    return LabeledItem(
+        listing,
+        label,
+        category=(row.get("category") or "").strip(),
+        used_value_usd=float(used_value) if used_value else None,
+        release_year=int(float(release_year)) if release_year else None,
+    )
 
 
 def load(path: Path = DEFAULT_PATH) -> list[LabeledItem]:

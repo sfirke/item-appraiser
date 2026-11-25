@@ -31,6 +31,7 @@ OUTPUT = {
     "unit_new_price_usd": 12.5,
     "condition": "used",
     "resale_demand": "typical",
+    "release_year": None,
     "confidence": "medium",
 }
 
@@ -79,7 +80,7 @@ def test_appraisal_multiplies_quantity_by_unit_price(tmp_path):
     assert result.condition == Condition.USED
     assert result.confidence == Confidence.MEDIUM
     assert result.assumption == OUTPUT["assumption"]
-    assert result.model_version == "claude-sonnet-5-5/p4+img+qty"
+    assert result.model_version == "claude-sonnet-5-5/p5+img+qty"
 
 
 def test_new_price_is_rounded_to_cents(tmp_path):
@@ -105,7 +106,7 @@ def test_no_quantity_arm_reads_a_total_and_asks_for_one(tmp_path):
     result = appraiser(tmp_path, client, use_quantity=False).appraise(LISTING)
     assert result.new_price_usd == 40
     assert result.quantity is None
-    assert result.model_version == "claude-sonnet-5-5/p4+img+total"
+    assert result.model_version == "claude-sonnet-5-5/p5+img+total"
     schema = client.requests[0]["output_config"]["format"]["schema"]
     assert "new_price_usd" in schema["properties"]
     assert "quantity" not in schema["properties"]
@@ -316,7 +317,7 @@ class TestEvaluateMain:
         self.run(tmp_path, "--yes")
         out = capsys.readouterr().out
         assert "estimated cost" in out
-        assert "claude-sonnet-5-5/p4+img+qty" in out
+        assert "claude-sonnet-5-5/p5+img+qty" in out
         assert "per item" in out
         assert "buy, model medium" in out
         assert "quantity accuracy: 0% of 2 (2 overcounted, 0 undercounted)" in out
@@ -438,7 +439,7 @@ def test_climate_adds_a_footprint_category_to_the_same_call(tmp_path):
     assert request["system"][0]["text"].startswith(prompt.system_prompt(True))
     assert "Footprint category." in request["system"][0]["text"]
     assert result.footprint_category == FootprintCategory.PLASTIC_GOODS
-    assert result.model_version == "claude-sonnet-5-5/p4+img+qty+co2-f1"
+    assert result.model_version == "claude-sonnet-5-5/p5+img+qty+co2-f1"
     assert result.new_item_kg_co2e == round(37.5 * PRICE_YEAR_ADJUSTMENT * 0.332, 1)
     assert result.buy_value_usd == 22.5
 
@@ -529,3 +530,40 @@ class TestEvaluateClimate:
     def test_bad_impacts_flag_is_a_usage_error(self, tmp_path, fake_api):
         with pytest.raises(SystemExit):
             self.run(tmp_path, "--impacts", "carbon")
+
+
+def test_appraisal_reads_the_release_year_and_policy_prices_by_age(tmp_path):
+    client = FakeClient(message({**OUTPUT, "quantity": 1, "release_year": 2019}))
+    result = appraiser(tmp_path, client).appraise(LISTING)
+    assert result.release_year == 2019
+    assert result.buy_value_usd == policy.buy_value(12.5, Condition.USED, release_year=2019)
+    assert appraiser(tmp_path).appraise(LISTING).release_year == 2019  # from the cache
+
+
+@pytest.mark.parametrize("year", [1066, 3000])
+def test_an_impossible_release_year_is_unusable(tmp_path, year):
+    client = FakeClient(message({**OUTPUT, "release_year": year}))
+    with pytest.raises(AppraisalError):
+        appraiser(tmp_path, client).appraise(LISTING)
+
+
+def test_schema_asks_for_a_release_year_that_may_be_null():
+    schema = prompt.output_schema()
+    assert schema["properties"]["release_year"] == {"type": ["integer", "null"]}
+    assert "release_year" in schema["required"]
+
+
+@pytest.mark.parametrize("year", [None, 2019])
+def test_validate_output_accepts_a_null_or_integer_release_year(year):
+    prompt.validate_output({**OUTPUT, "release_year": year}, prompt.output_schema())
+
+
+@pytest.mark.parametrize("year", ["2019", 2019.5, True])
+def test_validate_output_rejects_other_release_years(year):
+    with pytest.raises(ValueError, match="release_year"):
+        prompt.validate_output({**OUTPUT, "release_year": year}, prompt.output_schema())
+
+
+def test_null_is_rejected_where_the_schema_does_not_allow_it():
+    with pytest.raises(ValueError, match="quantity"):
+        prompt.validate_output({**OUTPUT, "quantity": None}, prompt.output_schema())

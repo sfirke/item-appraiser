@@ -33,3 +33,22 @@ def test_labels_read_the_assumption_and_default_to_hand():
     assert label.model_version == "hand"
     row = {"name": "Rake", "new_price_usd": "25", "assumption": "Singular column."}
     assert dataset.parse_row(row).label.assumption == "Singular column."
+
+
+def test_looked_up_used_value_stands_in_for_the_policy():
+    row = {"name": "Phone", "new_price_usd": "399", "used_value_usd": "40", "release_year": "2019"}
+    phone = dataset.parse_row(row)
+    assert phone.used_value_usd == 40
+    assert phone.release_year == 2019
+    assert phone.buy_value_usd == 40
+    assert phone.loan_value_usd == 20
+    # The hand release year is for checking the appraiser's, never for pricing the label.
+    assert phone.label.release_year is None
+
+
+def test_hand_value_comes_from_the_policy_without_a_looked_up_value():
+    drill = dataset.load(FIXTURE)[0]
+    assert drill.used_value_usd is None
+    assert drill.release_year is None
+    assert drill.buy_value_usd == 90
+    assert drill.loan_value_usd == 35

@@ -82,3 +82,44 @@ def test_main_prints_a_report(capsys):
     out = capsys.readouterr().out
     assert "category-median on 3 hand-valued items" in out
     assert "largest disagreements" in out
+
+
+PHONE_ROW = {
+    "item_id": "p1",
+    "name": "Google Pixel 3a",
+    "new_price_usd": "399",
+    "used_value_usd": "40",
+    "release_year": "2019",
+}
+
+
+class FixedAppraiser:
+    def __init__(self, appraisal):
+        self.appraisal = appraisal
+
+    def appraise(self, listing):
+        return self.appraisal
+
+
+def test_buy_value_is_scored_against_the_looked_up_used_value():
+    phone = dataset.parse_row(PHONE_ROW)
+    # 399 x 0.6 would be 239.40; the hand value to beat is the looked-up 40.
+    flat = evaluate.score(evaluate.predict(FixedAppraiser(Appraisal(399, Condition.USED)), [phone]))
+    assert flat.buy_value.total_ratio == pytest.approx(239.4 / 40)
+    assert flat.new_price.total_ratio == pytest.approx(1.0)
+    aged = Appraisal(399, Condition.USED, release_year=2019)
+    by_age = evaluate.score(evaluate.predict(FixedAppraiser(aged), [phone]))
+    assert by_age.buy_value.total_ratio < flat.buy_value.total_ratio
+    assert by_age.loan_value.total_ratio == pytest.approx(aged.loan_value_usd / 20)
+
+
+def test_report_lists_what_was_priced_by_age_with_the_hand_year():
+    phone = dataset.parse_row(PHONE_ROW)
+    drill = dataset.load(FIXTURE)[0]
+    aged = FixedAppraiser(Appraisal(399, Condition.USED, release_year=2018, assumption="A phone."))
+    text = evaluate.format_report(evaluate.score(evaluate.predict(aged, [phone, drill])))
+    assert "priced by age: 2" in text
+    assert "model 2018 vs hand 2019  Google Pixel 3a" in text
+    assert "model 2018 vs hand none  Cordless drill" in text
+    assert "released 2018" in text
+    assert "$40.00 looked up" in text
