@@ -3,44 +3,36 @@ Python library for estimating the value of household goods
 
 Built to value items lent and given away on [Meutch](https://github.com/sfirke/meutch),
 so we can roughly quantify how much members save themselves and each other, but
-it works on any listing with a name, a description and optional photos.
+it works on any listing with a name, a description and optional photos. An LLM
+estimates a few facts about the item; fixed, documented policies turn those into
+dollars and kg CO2e.
 
 
 ## Install
 
-Pick a model provider (see Choosing a model) and install its extra:
+Pick a model provider and install its extra:
 
 ```sh
 pip install 'item-appraiser[claude]'     # Claude, with an ANTHROPIC_API_KEY
 pip install 'item-appraiser[deepseek]'   # DeepSeek, with a DEEPSEEK_API_KEY
 ```
 
-The core package (data types, value policy, prompt) has no dependencies and
-can't appraise anything on its own. The `claude` extra adds the Anthropic SDK for
-`ClaudeAppraiser`; the `deepseek` extra adds the OpenAI SDK, which
-`DeepSeekAppraiser` uses against DeepSeek's OpenAI-compatible API. Install both if
-you like; they're independent.
+The core package (data types, policies, prompt) has no dependencies; each extra
+adds one provider's SDK.
 
 
 ## Choosing a model
 
-There's no default: you pick by constructing one appraiser or the other. Both
-send the same prompt and give the same `Appraisal` back, and both have been
-scored against hand-valued items (see Results).
+There's no default. Both appraisers send the same prompt, return the same
+`Appraisal`, and score about the same (see Results).
 
-- **Claude Sonnet 5.5** (`ClaudeAppraiser`). The prompt was tuned on it, and it
-  has been scored on 100 items. The model ID is pinned, so its answers don't
-  change underneath you. About \$0.003 per item.
-- **DeepSeek V4.1 Flash** (`DeepSeekAppraiser`). It scored better than Sonnet on
-  the 50 held-out items, at about an eighth of the cost (\$0.0003 per item), but
-  it has been scored on only those 50. `deepseek-flash` is a name DeepSeek moves
-  to newer models over time, so its answers can change without notice. You can
-  detect a change, though not prevent it: each appraisal's `model_fingerprint`
-  records the backend that answered (see below).
-
-Store `model_version` with each appraisal either way, plus `model_fingerprint`
-for DeepSeek, so you can tell later which model produced it. If you need fixed
-numbers, re-appraising old items is your call; the library won't do it for you.
+- **Claude Sonnet 5.5** (`ClaudeAppraiser`): scored on 100 items, and the model
+  ID is pinned, so its answers don't change underneath you. About \$0.003 per item.
+- **DeepSeek V4.1 Flash** (`DeepSeekAppraiser`): about a tenth of the cost
+  (\$0.0003 per item, half that off-peak), scored on 50 items. DeepSeek moves the
+  `deepseek-flash` name to newer models over time; each appraisal's
+  `model_fingerprint` records which backend answered, so you can detect a change
+  but not prevent it.
 
 
 ## Usage
@@ -70,11 +62,10 @@ appraisal.loan_value_usd  # 30.35
 appraisal.to_dict()       # every field plus the derived values, ready for JSON or a DB row
 ```
 
-For climate impact too, ask for it:
+For climate impact too, ask for it. It rides on the same API call:
 
 ```python
-appraiser = ClaudeAppraiser(impacts=["money", "climate"])  # or just ["climate"];
-# DeepSeekAppraiser takes the same impacts
+appraiser = ClaudeAppraiser(impacts=["money", "climate"])  # or just ["climate"]
 appraisal = appraiser.appraise(listing)
 
 appraisal.footprint_category  # FootprintCategory.POWER_TOOLS
@@ -83,224 +74,133 @@ appraisal.giveaway_kg_co2e    # 4.7, estimated avoided emissions if given away
 appraisal.loan_kg_co2e        # 3.1, estimated avoided emissions per loan
 ```
 
-Climate rides on the same API call (one extra field, about 1,400 more prompt
-tokens, mostly cached). The new price is estimated either way, because most
-emission factors are per dollar; `impacts` decides which derived values
-`to_dict()` reports. Money only, the default, sends exactly the tested prompt.
-
-An `Appraisal` also carries the condition, resale demand, the release year for
-devices priced by age (see below), the model's confidence,
-a one-sentence `assumption` a reviewer can check ("Priced as a DeWalt 20V MAX drill
-kit with two batteries..."), the quantity and unit price where the model counted
-units, a `model_version` string such as `claude-sonnet-5-5/p5+img+qty` or
-`deepseek-flash/p5+img+qty` that identifies the model, prompt version and
-settings, a `fingerprint`, and for DeepSeek a `model_fingerprint`.
-
-`to_dict()` gives these keys: `new_price_usd`, `condition`, `resale_demand`,
-`confidence`, `assumption`, `model_version`, `estimated_at` (ISO 8601),
-`quantity`, `unit_new_price_usd`, `footprint_category` (null without climate),
-`impacts` (a sorted list such as `["climate", "money"]`), `fingerprint`,
-`model_fingerprint` (null for Claude) and `release_year` (null unless the item
-is priced by age), plus
-the derived values for the requested impacts: `buy_value_usd` and
-`loan_value_usd` for money, `new_item_kg_co2e`, `giveaway_kg_co2e` and
-`loan_kg_co2e` for climate.
-
+Besides the estimates, an `Appraisal` carries the model's confidence, a
+one-sentence `assumption` a reviewer can check ("Priced as a DeWalt 20V MAX drill
+kit with two batteries..."), the quantity and unit price when the model counted
+units, a `model_version` such as `claude-sonnet-5-5/p5+img+qty`, a `fingerprint`
+and, for DeepSeek, a `model_fingerprint`.
 
 ### Storing appraisals and keeping them current
 
 Store `to_dict()` (as columns or a JSON column) and rebuild with
-`Appraisal.from_dict()`, which ignores the stored derived values (buy and loan
-values, kg CO2e) so they always come from the current policies.
+`Appraisal.from_dict()`. It ignores the stored derived values, so buy and loan
+values and kg CO2e always come from the current policies.
 
-The `fingerprint` identifies everything the estimate depended on: the listing's
-name, description and photo URLs, and the model, prompt, impacts and settings. To find
-listings that need appraising again, after an owner edits them or after an
-upgrade changes the prompt, compare it with what the appraiser would use now:
+`fingerprint` covers everything the estimate depended on: the listing's text and
+photo URLs, and the model, prompt, impacts and settings. Re-appraise when it
+changes, after an owner edits the listing or an upgrade changes the prompt:
 
 ```python
 if stored.fingerprint != appraiser.fingerprint(listing):
     stored = appraiser.appraise(listing)
 ```
 
-`fingerprint` covers what you send. For DeepSeek, whose model name doesn't pin
-the model, `model_fingerprint` covers what answered: a stored value that differs
-from newer appraisals' means DeepSeek changed the model or its serving setup
-since. Whether to re-appraise then is your call; the appraiser can't tell before
-calling the API.
+`model_fingerprint` covers what answered: for DeepSeek, a new value means the
+model or its serving setup changed. Whether to re-appraise then is up to you.
 
-Each call can take several seconds, so appraise from a background job or
-scheduled command rather than inside a web request, and pass a client with a
-timeout that suits it (the Anthropic SDK's default is 10 minutes):
+Each call can take several seconds, so appraise from a background job rather
+than inside a web request, and pass a client with a timeout that suits it (both
+SDKs default to 10 minutes):
 
 ```python
 appraiser = ClaudeAppraiser(client=anthropic.Anthropic(timeout=60, max_retries=2))
-appraiser = DeepSeekAppraiser(  # the OpenAI SDK's default is also 10 minutes
+appraiser = DeepSeekAppraiser(
     client=openai.OpenAI(api_key=key, base_url=item_appraiser.deepseek.BASE_URL, timeout=60)
 )
 ```
 
-`ClaudeAppraiser` options:
+### Options
 
-- `model`: defaults to Sonnet, the tested setting. Any Claude model ID works;
-  `item_appraiser.claude.HAIKU`, `SONNET` and `OPUS` have prices built in, so
-  their costs are tracked. For another model, pass
-  `price=item_appraiser.claude.Price(...)` to track costs, or go without.
-- `cache_dir`: store every usable response on disk, so appraising the same
-  listing again (same text, photos, model and prompt) costs nothing and needs no
-  API key. Off by default.
-- `client`: a configured `anthropic.Anthropic` client, for a different API key,
-  base URL, timeout or retry policy.
-- `use_images`, `use_quantity`: the tested settings are both on.
-- `impacts`: `"money"`, `"climate"`, or both; defaults to money. With climate,
-  `model_version` gains a suffix such as `+co2-f1`.
+Both appraisers take:
 
-`DeepSeekAppraiser` takes the same options, except:
+- `model`: Sonnet (`item_appraiser.claude.SONNET`) or DeepSeek Flash
+  (`item_appraiser.deepseek.FLASH`) by default, the scored settings. Other models
+  work; pass `price=...Price(...)` to track the cost of one without a built-in
+  price (Claude's `HAIKU`, `SONNET` and `OPUS` have them).
+- `client`: a configured SDK client. DeepSeek's must have `base_url` set to
+  `https://api.deepseek.com`; without one it reads `DEEPSEEK_API_KEY` and never
+  `OPENAI_API_KEY`.
+- `cache_dir`: keep every usable response on disk, so appraising the same
+  listing again costs nothing and needs no API key. Off by default.
+- `impacts`: `"money"` (default), `"climate"`, or both.
+- `use_images`, `use_quantity`: both on, the scored settings.
+- `image_check`: replaces the photo check. Each photo URL is sent only if it is
+  public http(s) and answers, since the provider fails the whole request on a
+  photo it can't load; skipped photos leave the listing appraised from its text.
 
-- `model`: defaults to `deepseek-flash` (`item_appraiser.deepseek.FLASH`), the
-  tested setting and the only DeepSeek model that reads photos; its price is
-  built in. Another DeepSeek model works with `price=item_appraiser.deepseek.Price(...)`
-  to track costs, or without. DeepSeek points `deepseek-flash` at newer model versions
-  over time, so `model_version` (`deepseek-flash/p5+img+qty`) doesn't pin the
-  exact model the way a Claude model ID does. Each appraisal's
-  `model_fingerprint` holds the `system_fingerprint` DeepSeek reported for that
-  answer. A new value means the model or its serving setup changed, so newer
-  estimates may not be comparable with older ones. DeepSeek doesn't document
-  exactly what changes it, so treat it as a signal to check, not a version
-  number. Claude appraisals leave it `None`, since the model ID already pins
-  the model.
-- `client`: a configured `openai.OpenAI` client with `base_url` set to
-  `https://api.deepseek.com`. Without one, the appraiser builds its own from
-  `DEEPSEEK_API_KEY`, and never falls back to `OPENAI_API_KEY`.
-
-Each call costs about \$0.003 with Sonnet and \$0.0003 with DeepSeek Flash
-(DeepSeek bills half price outside its peak hours, 01:00-04:00 and 06:00-10:00 UTC
-on weekdays). `appraiser.spent_usd` totals what an appraiser has spent, and
-`appraiser.estimate_cost(listings)` gives an upper-end estimate before running a
-batch. Authentication errors propagate as the provider SDK's exceptions.
-
-The API fetches photos from the provider's servers and fails the whole request if one
-won't load, so each URL is checked first and left out of the request (rather than
-failing it) unless it is http(s) on a public address and answers a HEAD request,
-or a one-byte GET where HEAD is refused. So `localhost` photos from a development
-server are skipped and the listing is appraised from its text. Pass
-`image_check=` to replace the check, or `use_images=False` to send no photos.
+`appraiser.spent_usd` totals what an appraiser has spent, and
+`appraiser.estimate_cost(listings)` gives an upper-end estimate before a batch.
+Authentication errors propagate as the provider SDK's exceptions.
 
 
 ## How values are derived
 
-The appraiser estimates the item's **new price**, its **condition** and its
-**resale demand**, and for phones, tablets, laptops and smartwatches the
-**release year** of the model. Everything else comes from a fixed policy in
-`src/item_appraiser/policy.py`:
+The appraiser estimates the item's **new price**, **condition** and **resale
+demand**, and for phones, tablets, laptops and smartwatches the **release year**
+of the model. A fixed policy in `src/item_appraiser/policy.py` does the rest:
 
-- **Buy value** = new price × condition multiplier (new 1.0, like new 0.8,
-  anything else 0.6). Kinds of item that sell for far less secondhand, such as
-  large furniture and china, have weak resale demand and lower multipliers
-  (new 1.0, like new 0.4, anything else 0.25).
-- **Devices priced by age.** When the appraisal has a release year, buy value =
-  new price × condition multiplier × age factor, where the age factor is
-  1.37 × 0.83^age, capped at 1, and age is the years since the middle of the
-  release year. For a used device that comes to **new price × 0.82 × 0.83^age**
-  once it's about 20 months old: 47% of its new price at three years, 32% at
-  five, 13% at ten. Before that it gets the ordinary multipliers. The value
-  never falls below 5% of the new price, and resale demand plays no part. The
-  new price here is what that model cost when it came out.
-- **Loan value** = half of the first \$50 of buy value plus a quarter of
-  anything above that, like tax brackets, so a pricier item never lends for
-  less. The lower rate on the top slice reflects that expensive items are more
-  rentable and less likely to be bought outright.
+- **Buy value** = new price × condition multiplier: new 1.0, like new 0.8,
+  anything else 0.6. Items with weak resale demand, such as large furniture,
+  china and superseded electronics, get 1.0, 0.4 and 0.25.
+- **Devices with a release year** lose value with age instead: buy value = new
+  price (at release) × condition multiplier × an age factor of 1.37 × 0.83^age,
+  capped at 1, with age measured from the middle of the release year. For a used
+  device that is **0.82 × 0.83^age** of the new price once it's about 20 months
+  old: 47% at three years, 32% at five, 13% at ten, never below 5%.
+- **Loan value** = half of the first \$50 of buy value plus a quarter of the
+  rest, like tax brackets, since expensive items are more often rented than bought.
 
-Keeping the policy out of the appraiser means it can change without
+The age curve was fitted in November 2026 to secondhand prices for 55 phones,
+tablets, laptops and smartwatches released from 2014 to 2025, as a share of
+their launch prices; the typical model is within 1.25x of it. Its limits: it
+covers only those four kinds of device; the laptop fit rests on six models, all
+MacBooks or Chromebooks; the 5% floor is a guess, as nothing in the data is that
+old; and it doesn't see damage. `AGE_VALUE_AT_RELEASE`, `AGE_VALUE_PER_YEAR` and
+`AGE_VALUE_FLOOR` are the numbers to refit.
+
+Because the policy is separate from the appraiser, it can change without
 re-appraising anything: store `new_price_usd`, `condition`, `resale_demand` and
-`release_year`, and recompute values with `item_appraiser.buy_value()` and
-`loan_value()`. For a device priced by age the value depends on the date, so it
-falls as the device gets older; `buy_value()` takes an `as_of` date (default
-today).
-
-### Where the age curve comes from
-
-Under the ordinary multipliers a used phone was valued at 60% of the price of
-a new one whatever its age, so a seven-year-old Pixel 3a came out near \$300
-when it sells for \$40 to \$70. The curve was fitted in November 2026 to what 55
-phone, tablet, laptop and smartwatch models released from 2014 to 2025 were
-selling for secondhand, each as a share of
-its launch price. A plain exponential fits well: the typical model is within
-about 1.25x of the curve. Fitted separately, phones, tablets and laptops lose
-15% to 21% a year, close enough that one curve serves them all. Published trade-in and resale reports show
-the same shape, a steep first year and then a steady yearly loss.
-
-Its limits:
-
-- It covers those four kinds of device only. Other electronics in the same
-  data hold value differently (a game console can sell for a quarter of its
-  launch price after 13 years), and for older TVs, monitors, printers and sound
-  bars the prompt asks for weak resale demand instead.
-- The laptop fit rests on five MacBooks and one Chromebook; no usable prices
-  were found for Windows laptops.
-- Nothing in the data is old enough to have reached a floor (a 2014 iPad Air 2
-  still sells at 12% of its launch price), so the 5% floor is a guess.
-- It's a 2026 snapshot. `AGE_VALUE_AT_RELEASE`, `AGE_VALUE_PER_YEAR` and
-  `AGE_VALUE_FLOOR` in `policy.py` are the numbers to refit.
-- It doesn't know about damage. A cracked screen or a failing battery is still
-  just "used".
+`release_year`, and recompute with `item_appraiser.buy_value()` and
+`loan_value()`. Values of devices with a release year fall over time, so those
+functions take an `as_of` date (default today).
 
 
 ## How climate impact is derived
 
-The same split applies. The appraiser says what kind of item it is (one of 44
-`FootprintCategory` values), and a fixed policy in
-`src/item_appraiser/climate.py` does the rest:
+The appraiser also picks one of 44 `FootprintCategory` values, and a fixed policy
+in `src/item_appraiser/climate.py` does the rest:
 
-- **New-item footprint** (kg CO2e of buying it new, cradle to shelf):
-  - Most categories: new price × an emission factor in kg CO2e per dollar, from
-    USEEIO (see Data sources), with prices converted to the factors' 2024
-    dollars by CPI. Factors run from about 0.05 (DVDs) to 0.5 (glassware)
-    kg per dollar; a \$100 cordless drill comes to about 10.5 kg.
+- **New-item footprint** (kg CO2e to make and sell one, cradle to shelf; use and
+  end of life are left out, since reuse avoids neither):
+  - Most categories: new price × a USEEIO emission factor in kg per dollar,
+    from about 0.05 (DVDs) to 0.5 (glassware). A \$100 drill comes to about 10.5 kg.
   - Computers, phones, tablets, monitors and TVs: a fixed footprint per unit
-    (laptop 182 kg, smartphone 79 kg, TV 328 kg), because per-dollar factors
-    badly understate imported electronics.
-  - Tickets, gift cards and services: zero, since nothing is manufactured.
-  - Use and end of life are left out: reusing an item avoids neither.
-- **Given away** = new-item footprint × 0.5 (the share of secondhand purchases
-  that replace buying new, the midpoint of published rates from 39% to 65%) ×
-  remaining life (new 1.0, like new 0.9, used 0.75).
-- **Per loan** = new-item footprint × 0.25. Library of Things credits 25-50%
-  of a purchase per borrow; the lower figure leaves room for the same item
-  being lent many times. Capping the total credited to one item across many
-  loans is up to the caller, which sees the loan history.
-- **Devices priced by age** (those with a release year) have less life left the
-  older they are, so both figures are also multiplied by the same age factor as
-  their value (see "How values are derived"), never going below 5% of the
-  new-item footprint. What a device still sells for is the best signal of how
-  much use it has left. A used 2019 Pixel 3a given away in late 2026 avoids
-  about 10 kg instead of 30; lent once, about 7 kg instead of 20. The new-item
-  footprint itself doesn't change with age.
+    from ADEME (laptop 182 kg, smartphone 79 kg, TV 328 kg), because per-dollar
+    factors badly understate imported electronics.
+  - Tickets, gift cards and services: zero.
+- **Given away** = new-item footprint × 0.5 (the midpoint of published rates,
+  39-65%, at which secondhand purchases replace new ones) × remaining life (new
+  1.0, like new 0.9, used 0.75).
+- **Per loan** = new-item footprint × 0.25, the low end of the 25-50% Library of
+  Things credits per borrow, since one item may be lent many times. Capping the
+  total for one item is up to the caller.
+- **Devices with a release year** have less life left as they age, so both
+  figures are also multiplied by the value policy's age factor, never below 5%.
+  A used 2019 phone given away in late 2026 avoids about 10 kg, against 30 kg
+  for a current one.
 
-Report these as **estimated avoided emissions**, separately, and never subtract
-them from anyone's emissions footprint (WBCSD Guidance on Avoided Emissions,
-2025). They're rough: they inherit the new-price error (typically 1.3x per item)
-and the spread within each category, and they haven't been checked against hand
-labels. Store `new_price_usd`, `quantity`, `condition`, `footprint_category`
-and `release_year`, and recompute with `item_appraiser.new_item_kg_co2e()`,
-`giveaway_kg_co2e()` and `loan_kg_co2e()`. Like buy values, the avoided
-emissions of a device priced by age depend on the date: `giveaway_kg_co2e()`,
-`loan_kg_co2e()` and the `appraisal_*` versions in `item_appraiser.climate`
-take an `as_of` date (default today).
+Report these as **estimated avoided emissions**, on their own, never subtracted
+from anyone's footprint (WBCSD Guidance on Avoided Emissions, 2025). They're
+rough: they inherit the new-price error and the spread within each category, and
+there are no hand labels to check them against. To recompute, store
+`footprint_category` and `quantity` as well as the value inputs, and use
+`new_item_kg_co2e()`, `giveaway_kg_co2e()` and `loan_kg_co2e()`; the last two
+take `release_year` and `as_of`.
 
-The categories are built to cover every listing on Meutch, not just the
-hand-valued ones, because Meutch's own categories are too coarse ("Home &
-Garden" spans light bulbs, saplings, mowers and furniture). Over all 329
-listings, the climate prompt (Sonnet, `f1`, \$1.02 in all) puts 4 (1%) in
-"other" (one-off specialty equipment with no common theme) and 3 tickets, gift
-cards and coupons in the zero-footprint category. Six categories (computers,
-monitors, tablets, TVs, upholstered furniture) have no listings so far. Together
-the 329 come to about 4,200 kg CO2e new (median 5.4 kg). To
-check coverage as listings grow, run the climate prompt over a CSV of all listings and
-review what lands in "other" (see Evaluation). Anything recurring there is a
-candidate for a new category; bump `FOOTPRINT_VERSION` in `prompt.py` when the
+The categories are meant to cover every Meutch listing. Of all 329 in November
+2026, 4 landed in "other" and 3 in the zero-footprint category; together they
+come to about 4,200 kg CO2e new. Bump `FOOTPRINT_VERSION` in `prompt.py` when the
 categories change.
-
 
 ### Data sources
 
@@ -320,23 +220,57 @@ categories change.
   in `climate.py`.
 
 
+## Results
+
+Scored with prompt `p5`, photos and quantity counting on, against hand-valued
+Meutch listings. **Typical error** is the median factor by which estimates miss;
+**total bias** is the sum of estimates over the sum of hand values, which matters
+most because impact figures are sums.
+
+| Held-out 50 items | Claude Sonnet 5.5 | DeepSeek V4.1 Flash |
+|---|---|---|
+| New price, typical error | 1.44x | 1.33x |
+| Buy value, typical error | 1.50x | 1.56x |
+| Buy value, within 25% / within 2x | 28% / 68% | 34% / 76% |
+| Buy value, total bias | 1.01x | 0.97x |
+| Loan value, total bias | 0.99x | 0.98x |
+| Condition accuracy | 94% | 90% |
+| Quantity accuracy | 98% | 96% |
+| Cost per item | \$0.0028 | \$0.0003 |
+
+Sonnet on its other sets:
+
+| Claude Sonnet 5.5 | First 50 (tuning) | All 100 | Electronics (34) |
+|---|---|---|---|
+| Buy value, typical error | 1.41x | 1.47x | 1.74x |
+| Buy value, total bias | 0.89x | 0.95x | 1.42x |
+
+- **Good in aggregate, not per item.** Summed values land within about 5% of the
+  hand totals on the general sets, but a typical estimate is off by 1.5x and a
+  quarter to a third miss by more than 2x. Repeat runs of the same prompt differ
+  by up to 0.1x in typical error and 0.12x in bias, so the two models are level.
+- **Electronics still come out high**, by about 1.4x in total. The electronics
+  set's buy values were looked up on resale sites rather than put through the
+  policy. Its three phones, all damaged, came out at \$82, \$174 and \$330
+  against \$40, \$80 and \$150; the policy doesn't see damage.
+- **Resale demand is the weakest field.** Most large misses are everyday items
+  (a multimeter, a hot glue gun) called weak resale, which cuts their value to
+  under half.
+- **Release years go where they should**: on 56 made-up listings, Sonnet gave a
+  year to all 16 devices and to one other item (an iPod Touch); DeepSeek got all
+  56 right.
+
+The DeepSeek run was served by V4.1-Flash-1017 (fingerprint
+`bc19ba97cbe016479903222bb1578db6`) in November 2026.
+
+
 ## Other models
 
-Claude and DeepSeek are implemented and scored (see Results). Neither depends on
-the other: the prompt, the output JSON schema and the parsing of the model's
-answer live in `item_appraiser.prompt`, and the on-disk response cache in
-`item_appraiser.cache`. An appraiser for another model would send
-`prompt.system_prompt()` as the system prompt, the photos plus
-`prompt.listing_text()` as the user message, request `prompt.output_schema()`, and
-pass the parsed JSON to `prompt.parse_output()`, giving each the same `impacts`
-to add the footprint category. A model whose API enforces a JSON schema (Claude)
-needs nothing more. One with only a JSON mode (DeepSeek) gets
-`prompt.json_instructions()` appended to the system prompt and its answer checked
-with `prompt.validate_output()`; `deepseek.py` is the example to copy for any
-OpenAI-compatible API. Anything with an `appraise(listing) -> Appraisal` method
-fits the `Appraiser` protocol and can be scored with the evaluation harness
-below. A different model would need its own run against the hand-valued sets
-before its values are trusted.
+Anything with an `appraise(listing) -> Appraisal` method fits the `Appraiser`
+protocol and can be scored with the evaluation harness. The prompt, output schema
+and answer parsing live in `item_appraiser.prompt`, so a new provider only needs
+the API call: `deepseek.py` is the example to copy for an OpenAI-compatible API.
+Score a new model against the hand-valued sets before trusting its values.
 
 
 ## Development
@@ -348,232 +282,40 @@ python3 -m venv .venv
 ```
 
 CI runs the tests on Python 3.11 to 3.14, checks the core works without the
-`claude` extra, and checks the built package.
+extras, and checks the built package.
 
-To release: bump `version` in `pyproject.toml` and date the entry in
-`CHANGELOG.md`, merge to `main`, then tag and push:
+To release, bump `version` in `pyproject.toml`, date the entry in
+`CHANGELOG.md`, merge to `main`, and push a matching tag (`git tag v1.2.3 && git
+push origin v1.2.3`). The `Publish` workflow uploads it to PyPI with Trusted
+Publishing.
 
-```sh
-git tag v0.2.0 && git push origin v0.2.0
-```
+### Test data and evaluation
 
-The `Publish` workflow builds the package and uploads it to PyPI with Trusted
-Publishing. Before the first release, add a pending publisher on PyPI (project
-`item-appraiser`, owner `sfirke`, repository `item-appraiser`, workflow
-`publish.yml`, environment `pypi`) and create a `pypi` environment in the
-GitHub repository settings.
+`scripts/sample_items.py` draws a seeded random sample from a Meutch database
+dump into a CSV with blank columns for hand values (`--help` for options;
+`--exclude` draws a held-out set that skips items already drawn). `data/` is
+git-ignored because the listings are real member content.
 
-
-## Test data
-
-`scripts/sample_items.py` draws a seeded random sample of items from a Meutch
-database dump into `data/items_sample.csv`, with blank columns for
-hand-estimated values. Point it at the gzipped dump with `--dump`, or set
-`ITEM_APPRAISER_DUMP` once:
+Score an appraiser against a hand-valued CSV:
 
 ```sh
-export ITEM_APPRAISER_DUMP=~/path/to/db_backup.sql.gz
-python3 scripts/sample_items.py            # 50 items, default seed
-python3 scripts/sample_items.py --help     # --dump, --out, --seed, -n, --exclude, --force
-```
-
-To draw a held-out set for checking settings that were tuned on the first 50,
-use a new seed and exclude the items already drawn:
-
-```sh
-python3 scripts/sample_items.py --seed 20261030 --exclude data/items_sample.csv --out data/items_heldout.csv
-```
-
-`data/` is git-ignored because the listings are real member content.
-
-
-## Evaluation
-
-Score an appraiser against the hand-valued items:
-
-```sh
-.venv/bin/python -m item_appraiser.evaluate                 # reads data/items_sample.csv
-.venv/bin/python -m item_appraiser.evaluate --data other.csv --worst 10
-```
-
-The CSV needs `name` and `new_price_usd` columns, and reads `description`,
-`image_urls` (space-separated), `item_id`, `category`, `quantity`, `condition`,
-`resale_demand` and `confidence` when present.
-
-The hand buy value is normally the label's new price put through the value
-policy. Where a `used_value_usd` column is filled in (what the item would sell
-for as listed, looked up on a resale site), that is the hand buy value instead,
-so the policy itself can be checked. A `release_year` column is shown next to
-the appraiser's year for every item it priced by age.
-
-The report gives, for new price, buy value and loan value:
-
-- **typical error**: the median factor by which estimates miss (1.5x means
-  half the estimates are within a factor of 1.5);
-- the share of estimates **within 25%** and **within 2x**;
-- **total bias**: the sum of estimates over the sum of hand values. This
-  matters most, because impact figures are sums.
-
-It also breaks buy-value error down by the hand estimate's confidence and the
-model's own, reports condition accuracy and quantity accuracy (where the labels
-have a `quantity` column), and lists the largest disagreements to review by hand,
-with the model's assumption next to the hand value.
-
-`category-median` is a baseline that guesses the median new price of other items
-in the same category (scored leave-one-out). On the 50-item set its typical
-buy-value error is about 2.3x, and its total buy value comes out at 0.55x the hand
-total. Any real appraiser needs to beat that.
-
-To score Claude, put `ANTHROPIC_API_KEY` in `.env`, then:
-
-```sh
-.venv/bin/python -m item_appraiser.evaluate --appraiser claude --limit 5   # Sonnet, photos
-.venv/bin/python -m item_appraiser.evaluate --appraiser claude --model haiku
-.venv/bin/python -m item_appraiser.evaluate --appraiser claude --no-images
-.venv/bin/python -m item_appraiser.evaluate --appraiser claude --no-quantity
-```
-
-To score DeepSeek, put `DEEPSEEK_API_KEY` in `.env`; the same options apply:
-
-```sh
-.venv/bin/python -m item_appraiser.evaluate --appraiser deepseek --limit 5   # Flash, photos
+.venv/bin/python -m item_appraiser.evaluate                                 # category-median baseline
+.venv/bin/python -m item_appraiser.evaluate --appraiser claude --limit 5
 .venv/bin/python -m item_appraiser.evaluate --appraiser deepseek --data data/items_heldout.csv
 ```
 
-Any run that would call the API prints a cost estimate and asks first (`--yes`
-skips the question). Responses are cached in `data/cache/claude/` or
-`data/cache/deepseek/` (`--cache-dir` to change it), so re-scoring costs nothing
-and needs no API key.
+The CSV needs `name` and `new_price_usd`, and reads `description`, `image_urls`
+(space-separated), `item_id`, `category`, `quantity`, `condition`,
+`resale_demand`, `confidence`, `release_year` and `used_value_usd` (a looked-up
+resale price, used as the hand buy value) when present. The report gives typical
+error, within 25% and 2x, and total bias for new price, buy and loan value, plus
+condition and quantity accuracy and the largest misses next to the model's
+assumption. The baseline guesses each category's median price, and any real
+appraiser needs to beat it.
 
-DeepSeek runs also print the model fingerprint the answers came from. Cached
-answers are keyed by the name `deepseek-flash`, so after DeepSeek moves that name
-to a newer model, a partly cached run would mix the two. When the scored answers
-span more than one fingerprint, the report prints a warning with a count for
-each; score each model with its own `--cache-dir` before comparing them.
-
-`--impacts money,climate` adds an unscored climate summary after the report:
-totals, how many items fell in each footprint category, every item in "other"
-or the zero-footprint category, and the largest footprints with the model's
-assumption. There are no hand labels for climate, so this is for eyeballing.
-
-To check category coverage across every listing, not just the hand-valued ones,
-draw them all (the sampler with `-n` set to the total) and run `--unlabeled`
-(with either LLM appraiser),
-which appraises every row and prints only the climate summary:
-
-```sh
-python3 scripts/sample_items.py -n 329 --out data/items_all.csv
-.venv/bin/python -m item_appraiser.evaluate --appraiser claude --impacts climate \
-    --unlabeled --data data/items_all.csv
-```
-
-
-### Results
-
-Both models were scored on the same 50 held-out items with the same prompt
-(`p5`) and settings (photos, quantity counting, low-effort thinking). See the
-start of Evaluation for what each measure means.
-
-| Held-out 50 items | Better is | Claude Sonnet 5.5 | DeepSeek V4.1 Flash (1017) |
-|---|---|---|---|
-| New price, typical error | lower | 1.44x | **1.33x** |
-| Buy value, typical error | lower | **1.50x** | 1.56x |
-| Buy value, within 25% | higher | 28% | **34%** |
-| Buy value, within 2x | higher | 68% | **76%** |
-| Buy value, total bias | closer to 1.00x | **1.01x** | 0.97x |
-| Loan value, total bias | closer to 1.00x | **0.99x** | 0.98x |
-| Condition accuracy | higher | **94%** | 90% |
-| Quantity accuracy | higher | **98%** | 96% |
-| Resale demand, items disagreeing with hand label | lower | 18 | **15** |
-| Cost per item | lower | \$0.0028 | **\$0.0003** |
-| Model ID | | `claude-sonnet-5-5` | `deepseek-flash` |
-| Model fingerprint | | (pinned by ID) | `bc19ba97…` (all 50 answers) |
-
-Takeaways:
-
-- **The two are about level, and DeepSeek Flash costs about a tenth as much.**
-  Item by item, its buy value was closer to the hand value on 30 items and
-  Sonnet's on 16 (4 tied), but the summary measures split between them and the
-  gaps are within run-to-run noise (see below). All 50 of its answers were
-  usable.
-- **Both are good enough in aggregate.** Summed buy and loan values land within
-  3% of the hand totals, which is what impact figures need.
-- **Neither is precise per item.** A typical estimate is off by 1.5-1.6x, and a
-  quarter (DeepSeek) to a third (Sonnet) miss by more than 2x.
-- **Resale demand is the weakest field for both.** Most of the large misses are
-  everyday items (a multimeter, a tube of grease, a hot glue gun) called "weak"
-  resale where the hand label says "typical", which cuts the buy value to well
-  under half.
-- **Each has a case, so neither is the default.** Sonnet is the model the
-  prompt was tuned on, scored on 100 items, with a pinned model ID. DeepSeek
-  costs far less, but this is one 50-item set and one run, and `deepseek-flash`
-  moves to newer models over time (it served V4.1-Flash-1017, fingerprint
-  `bc19ba97cbe016479903222bb1578db6`, in November 2026). Scoring DeepSeek on
-  the first 50 items as well would show how it compares there.
-- **This set doesn't test the age curve.** None of the 50 is a phone, tablet,
-  laptop or smartwatch; the electronics set below covers those. Four of the 50
-  are also in that electronics set, which `p5` was tuned on, so the held-out
-  set is no longer entirely unseen.
-
-
-#### Claude Sonnet 5.5 on both sets
-
-The prompt and settings were first tuned with Sonnet 5.5 on the first 50
-hand-valued items. The held-out 50 are a second, non-overlapping sample
-(`--exclude` in the sampler) used only for scoring, apart from the four items
-noted above, so they're the fairer measure.
-
-| Claude Sonnet 5.5, prompt `p5` | First 50 (tuning) | Held-out 50 | All 100 |
-|---|---|---|---|
-| New price, typical error | 1.29x | 1.44x | 1.35x |
-| Buy value, typical error | 1.41x | 1.50x | 1.47x |
-| Buy value, within 25% | 36% | 28% | 32% |
-| Buy value, within 2x | 76% | 68% | 72% |
-| Buy value, total bias | 0.89x | 1.01x | 0.95x |
-| Loan value, total bias | 0.94x | 0.99x | 0.96x |
-| Condition accuracy | 92% | 94% | 93% |
-| Quantity accuracy | 96% | 98% | 97% |
-
-Over all 100, summed values land within 5% of the hand totals. With 50 items
-per set, differences of a few points between columns are within noise.
-
-
-#### Prompt `p5` and the electronics set
-
-Prompt `p5` adds the release year for devices priced by age, and asks for weak
-resale demand on electronics that newer models have superseded. It was tuned on
-34 hand-valued electronics listings whose buy values were looked up rather than
-derived from the policy, and on 56 made-up listings that check which kinds of
-item get a release year.
-
-| Claude Sonnet 5.5, buy value | `p4` | `p5` |
-|---|---|---|
-| Electronics (34), typical error | 1.74x | 1.74x |
-| Electronics (34), total bias | 2.17x | 1.42x |
-| First 50, typical error | 1.50x | 1.41x |
-| First 50, total bias | 0.95x | 0.89x |
-| Held-out 50, typical error | 1.50x | 1.50x |
-| Held-out 50, total bias | 0.94x | 1.01x |
-
-Both columns were run in late November 2026. The same `p4` prompt run a few
-weeks earlier scored 1.47x and 0.97x on the first 50 and 1.60x and 1.06x on the
-held-out 50: that gap (up to 0.1x in typical error and 0.12x in bias) is the
-run-to-run noise to read every table in this section against. By that measure
-`p5` changes
-nothing on the general sets, and on electronics it removes about two thirds of
-the overestimate without making the typical item any closer.
-
-- **The three phones in the set** went from \$299, \$299 and \$539 to \$82, \$174
-  and \$330, against hand values of \$40, \$80 and \$150. All three are damaged,
-  which the policy doesn't see; undamaged, the hand values would be about \$60,
-  \$110 and \$299.
-- **The release year goes where it should.** Of the 56 made-up listings, Sonnet
-  gave a year to all 16 phones, tablets, laptops and smartwatches and to one of
-  the 40 other things (an iPod Touch); DeepSeek Flash got all 56 right. In the
-  34 real listings both models gave a year to the three phones and nothing else.
-- **The other 31 electronics** went from 1.60x the hand total to 1.21x, from
-  the weak-resale wording. The largest misses left go both ways: two old
-  printers and a barely used Bluetooth amp valued three to four times too high,
-  and a multimeter, a handheld radio and a keyboard called weak resale and
-  valued at about a third of the hand value.
-
+Runs that call the API read keys from `.env`, show a cost estimate and ask first
+(`--yes` skips), and cache responses under `data/cache/`. A DeepSeek run warns
+when the answers came from more than one model fingerprint. `--impacts
+money,climate` adds an unscored climate summary; with climate on, `--unlabeled`
+prints only that summary for a CSV without hand values, to check category coverage across
+all listings.
