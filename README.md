@@ -269,14 +269,24 @@ The same split applies. The appraiser says what kind of item it is (one of 44
   of a purchase per borrow; the lower figure leaves room for the same item
   being lent many times. Capping the total credited to one item across many
   loans is up to the caller, which sees the loan history.
+- **Devices priced by age** (those with a release year) have less life left the
+  older they are, so both figures are also multiplied by the same age factor as
+  their value (see "How values are derived"), never going below 5% of the
+  new-item footprint. What a device still sells for is the best signal of how
+  much use it has left. A used 2019 Pixel 3a given away in late 2026 avoids
+  about 10 kg instead of 30; lent once, about 7 kg instead of 20. The new-item
+  footprint itself doesn't change with age.
 
 Report these as **estimated avoided emissions**, separately, and never subtract
 them from anyone's emissions footprint (WBCSD Guidance on Avoided Emissions,
 2025). They're rough: they inherit the new-price error (typically 1.3x per item)
 and the spread within each category, and they haven't been checked against hand
-labels. Store `new_price_usd`, `quantity`, `condition` and `footprint_category`,
-and recompute with `item_appraiser.new_item_kg_co2e()`, `giveaway_kg_co2e()` and
-`loan_kg_co2e()`.
+labels. Store `new_price_usd`, `quantity`, `condition`, `footprint_category`
+and `release_year`, and recompute with `item_appraiser.new_item_kg_co2e()`,
+`giveaway_kg_co2e()` and `loan_kg_co2e()`. Like buy values, the avoided
+emissions of a device priced by age depend on the date: `giveaway_kg_co2e()`,
+`loan_kg_co2e()` and the `appraisal_*` versions in `item_appraiser.climate`
+take an `as_of` date (default today).
 
 The categories are built to cover every listing on Meutch, not just the
 hand-valued ones, because Meutch's own categories are too coarse ("Home &

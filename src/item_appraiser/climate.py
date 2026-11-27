@@ -34,11 +34,18 @@ Not every gift or loan stands in for buying something new, so only part of the
 new-item footprint counts as avoided. The figures are "estimated avoided
 emissions" in the sense of the WBCSD Guidance on Avoided Emissions (v2, 2025):
 report them on their own, never subtracted from anyone's emissions footprint.
+
+Devices priced by age (those with a `release_year`) also have less life left the
+older they are, so their avoided emissions fall with age by the same factor as
+their value (`item_appraiser.policy.age_factor`). Like those values, they depend
+on the date.
 """
 
 from dataclasses import dataclass
+from datetime import date
 
 from item_appraiser.models import Appraisal, Condition, FootprintCategory
+from item_appraiser.policy import age_factor
 
 # Converts today's prices to the factors' 2024 dollars: CPI-U annual average for
 # 2024 (313.689) over September 2026 (336.940), BLS series CUUR0000SA0 / FRED CPIAUCNS.
@@ -58,6 +65,13 @@ REMAINING_LIFE = {
     Condition.LIKE_NEW: 0.9,
     Condition.USED: 0.75,
 }
+
+# For devices with a release year, the remaining life above is scaled by the value
+# policy's age factor: what a device still sells for is the best signal we have of
+# how much use the market expects it to give, and an old phone stands in for only
+# a year or so of a new one's life. A working device still gets some use, so the
+# share never drops below this; it matches the value policy's AGE_VALUE_FLOOR.
+REMAINING_LIFE_FLOOR = 0.05
 
 # Share of the new-item footprint each loan avoids. Library of Things (UK)
 # credited 25% of a purchase per borrow, later raised to 50% after a member
@@ -339,14 +353,45 @@ def new_item_kg_co2e(
     return round(new_price_usd * PRICE_YEAR_ADJUSTMENT * factor.kg_per_usd, 1)
 
 
-def giveaway_kg_co2e(new_item_kg: float, condition: Condition) -> float:
-    """Estimated avoided emissions when the item is given away."""
-    return round(new_item_kg * GIVEAWAY_DISPLACEMENT * REMAINING_LIFE[condition], 1)
+def remaining_life(
+    condition: Condition, release_year: int | None = None, as_of: date | None = None
+) -> float:
+    """Share of a new item's life the item has left.
+
+    With a `release_year` the item is a device priced by age, and its share also
+    falls with age on `as_of` (default today), never below REMAINING_LIFE_FLOOR.
+    """
+    share = REMAINING_LIFE[condition]
+    if release_year is None:
+        return share
+    return max(share * age_factor(release_year, as_of), REMAINING_LIFE_FLOOR)
 
 
-def loan_kg_co2e(new_item_kg: float) -> float:
-    """Estimated avoided emissions for one loan of the item."""
-    return round(new_item_kg * LOAN_FRACTION, 1)
+def giveaway_kg_co2e(
+    new_item_kg: float,
+    condition: Condition,
+    release_year: int | None = None,
+    as_of: date | None = None,
+) -> float:
+    """Estimated avoided emissions when the item is given away.
+
+    With a `release_year` this falls as the device ages; see `remaining_life`.
+    """
+    life = remaining_life(condition, release_year, as_of)
+    return round(new_item_kg * GIVEAWAY_DISPLACEMENT * life, 1)
+
+
+def loan_kg_co2e(
+    new_item_kg: float, release_year: int | None = None, as_of: date | None = None
+) -> float:
+    """Estimated avoided emissions for one loan of the item.
+
+    The condition doesn't apply (see LOAN_FRACTION), but age does: borrowing an
+    old device stands in for less of a new purchase than borrowing a current one,
+    and a loan should never credit more than giving the same device away.
+    """
+    life = remaining_life(Condition.NEW, release_year, as_of)
+    return round(new_item_kg * LOAN_FRACTION * life, 1)
 
 
 def appraisal_new_item_kg_co2e(appraisal: Appraisal) -> float | None:
@@ -357,11 +402,15 @@ def appraisal_new_item_kg_co2e(appraisal: Appraisal) -> float | None:
     )
 
 
-def appraisal_giveaway_kg_co2e(appraisal: Appraisal) -> float | None:
+def appraisal_giveaway_kg_co2e(appraisal: Appraisal, as_of: date | None = None) -> float | None:
     new_item_kg = appraisal_new_item_kg_co2e(appraisal)
-    return None if new_item_kg is None else giveaway_kg_co2e(new_item_kg, appraisal.condition)
+    if new_item_kg is None:
+        return None
+    return giveaway_kg_co2e(new_item_kg, appraisal.condition, appraisal.release_year, as_of)
 
 
-def appraisal_loan_kg_co2e(appraisal: Appraisal) -> float | None:
+def appraisal_loan_kg_co2e(appraisal: Appraisal, as_of: date | None = None) -> float | None:
     new_item_kg = appraisal_new_item_kg_co2e(appraisal)
-    return None if new_item_kg is None else loan_kg_co2e(new_item_kg)
+    if new_item_kg is None:
+        return None
+    return loan_kg_co2e(new_item_kg, appraisal.release_year, as_of)

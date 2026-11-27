@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.2.1 (2026-11-27)
+
+Avoided emissions of old phones, tablets, laptops and smartwatches now fall
+with age, as their values did in 0.2.0. They used to be credited as much as a
+current model: a used 2019 Pixel 3a given away avoided 29.6 kg CO2e, and now
+avoids about 10 kg.
+
+- With a release year, `giveaway_kg_co2e()` and `loan_kg_co2e()` multiply the
+  remaining life by the value policy's age factor, never going below
+  `REMAINING_LIFE_FLOOR` (5%). The new-item footprint is unchanged.
+- New `climate.remaining_life(condition, release_year, as_of)`.
+- `giveaway_kg_co2e()`, `loan_kg_co2e()`, `appraisal_giveaway_kg_co2e()` and
+  `appraisal_loan_kg_co2e()` take optional `release_year` (the first two) and
+  `as_of` (all four) arguments, so existing calls keep working.
+
+Upgrading:
+
+- **Pass `as_of`** to the climate functions wherever you already pass it to
+  `buy_value()`, so an event's avoided emissions are computed as of when it
+  happened. Without it they use today's date.
+- **Recompute stored avoided emissions** for devices with a release year if you
+  keep them; nothing needs re-appraising.
+
 ## 0.2.0 (2026-11-25)
 
 Old phones, tablets, laptops and smartwatches are now valued by their age. They
