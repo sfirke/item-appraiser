@@ -30,9 +30,9 @@ scored against hand-valued items (see Results).
 
 - **Claude Sonnet 5.5** (`ClaudeAppraiser`). The prompt was tuned on it, and it
   has been scored on 100 items. The model ID is pinned, so its answers don't
-  change underneath you. About $0.003 per item.
+  change underneath you. About \$0.003 per item.
 - **DeepSeek V4.1 Flash** (`DeepSeekAppraiser`). It scored better than Sonnet on
-  the 50 held-out items, at about an eighth of the cost ($0.0003 per item), but
+  the 50 held-out items, at about an eighth of the cost (\$0.0003 per item), but
   it has been scored on only those 50. `deepseek-flash` is a name DeepSeek moves
   to newer models over time, so its answers can change without notice. You can
   detect a change, though not prevent it: each appraisal's `model_fingerprint`
@@ -173,7 +173,7 @@ appraiser = DeepSeekAppraiser(  # the OpenAI SDK's default is also 10 minutes
   `https://api.deepseek.com`. Without one, the appraiser builds its own from
   `DEEPSEEK_API_KEY`, and never falls back to `OPENAI_API_KEY`.
 
-Each call costs about $0.003 with Sonnet and $0.0003 with DeepSeek Flash
+Each call costs about \$0.003 with Sonnet and \$0.0003 with DeepSeek Flash
 (DeepSeek bills half price outside its peak hours, 01:00-04:00 and 06:00-10:00 UTC
 on weekdays). `appraiser.spent_usd` totals what an appraiser has spent, and
 `appraiser.estimate_cost(listings)` gives an upper-end estimate before running a
@@ -206,7 +206,7 @@ The appraiser estimates the item's **new price**, its **condition** and its
   five, 13% at ten. Before that it gets the ordinary multipliers. The value
   never falls below 5% of the new price, and resale demand plays no part. The
   new price here is what that model cost when it came out.
-- **Loan value** = half of the first $50 of buy value plus a quarter of
+- **Loan value** = half of the first \$50 of buy value plus a quarter of
   anything above that, like tax brackets, so a pricier item never lends for
   less. The lower rate on the top slice reflects that expensive items are more
   rentable and less likely to be bought outright.
@@ -221,8 +221,8 @@ today).
 ### Where the age curve comes from
 
 Under the ordinary multipliers a used phone was valued at 60% of the price of
-a new one whatever its age, so a seven-year-old Pixel 3a came out near $300
-when it sells for $40 to $70. The curve was fitted in November 2026 to what 55
+a new one whatever its age, so a seven-year-old Pixel 3a came out near \$300
+when it sells for \$40 to \$70. The curve was fitted in November 2026 to what 55
 phone, tablet, laptop and smartwatch models released from 2014 to 2025 were
 selling for secondhand, each as a share of
 its launch price. A plain exponential fits well: the typical model is within
@@ -256,7 +256,7 @@ The same split applies. The appraiser says what kind of item it is (one of 44
   - Most categories: new price × an emission factor in kg CO2e per dollar, from
     USEEIO (see Data sources), with prices converted to the factors' 2024
     dollars by CPI. Factors run from about 0.05 (DVDs) to 0.5 (glassware)
-    kg per dollar; a $100 cordless drill comes to about 10.5 kg.
+    kg per dollar; a \$100 cordless drill comes to about 10.5 kg.
   - Computers, phones, tablets, monitors and TVs: a fixed footprint per unit
     (laptop 182 kg, smartphone 79 kg, TV 328 kg), because per-dollar factors
     badly understate imported electronics.
@@ -291,7 +291,7 @@ take an `as_of` date (default today).
 The categories are built to cover every listing on Meutch, not just the
 hand-valued ones, because Meutch's own categories are too coarse ("Home &
 Garden" spans light bulbs, saplings, mowers and furniture). Over all 329
-listings, the climate prompt (Sonnet, `f1`, $1.02 in all) puts 4 (1%) in
+listings, the climate prompt (Sonnet, `f1`, \$1.02 in all) puts 4 (1%) in
 "other" (one-off specialty equipment with no common theme) and 3 tickets, gift
 cards and coupons in the zero-footprint category. Six categories (computers,
 monitors, tablets, TVs, upholstered furniture) have no listings so far. Together
@@ -485,7 +485,7 @@ start of Evaluation for what each measure means.
 | Condition accuracy | higher | **94%** | 90% |
 | Quantity accuracy | higher | **98%** | 96% |
 | Resale demand, items disagreeing with hand label | lower | 18 | **15** |
-| Cost per item | lower | $0.0028 | **$0.0003** |
+| Cost per item | lower | \$0.0028 | **\$0.0003** |
 | Model ID | | `claude-sonnet-5-5` | `deepseek-flash` |
 | Model fingerprint | | (pinned by ID) | `bc19ba97…` (all 50 answers) |
 
@@ -563,10 +563,10 @@ run-to-run noise to read every table in this section against. By that measure
 nothing on the general sets, and on electronics it removes about two thirds of
 the overestimate without making the typical item any closer.
 
-- **The three phones in the set** went from $299, $299 and $539 to $82, $174
-  and $330, against hand values of $40, $80 and $150. All three are damaged,
-  which the policy doesn't see; undamaged, the hand values would be about $60,
-  $110 and $299.
+- **The three phones in the set** went from \$299, \$299 and \$539 to \$82, \$174
+  and \$330, against hand values of \$40, \$80 and \$150. All three are damaged,
+  which the policy doesn't see; undamaged, the hand values would be about \$60,
+  \$110 and \$299.
 - **The release year goes where it should.** Of the 56 made-up listings, Sonnet
   gave a year to all 16 phones, tablets, laptops and smartwatches and to one of
   the 40 other things (an iPod Touch); DeepSeek Flash got all 56 right. In the
