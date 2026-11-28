@@ -68,9 +68,10 @@ REMAINING_LIFE = {
 
 # For devices with a release year, the remaining life above is scaled by the value
 # policy's age factor: what a device still sells for is the best signal we have of
-# how much use the market expects it to give, and an old phone stands in for only
-# a year or so of a new one's life. A working device still gets some use, so the
-# share never drops below this; it matches the value policy's AGE_VALUE_FLOOR.
+# how much use the market expects it to give. A used phone released in 2019 is
+# credited with about a quarter of a new one's life in late 2026, against 75% for a
+# current used one. A working device still gets some use, so the share never drops
+# below this; it matches the value policy's AGE_VALUE_FLOOR.
 REMAINING_LIFE_FLOOR = 0.05
 
 # Share of the new-item footprint each loan avoids. Library of Things (UK)

@@ -97,7 +97,7 @@ def test_a_device_without_a_release_year_has_its_full_remaining_life():
 def test_remaining_life_of_a_device_falls_with_age_like_its_value():
     life = remaining_life(Condition.USED, release_year=2019, as_of=NOV_2026)
     assert life == pytest.approx(0.75 * age_factor(2019, NOV_2026))
-    assert 0.25 < life < 0.3  # a 7-year-old phone has about a year of use left
+    assert 0.25 < life < 0.27  # 7.4 years old: about 26% of a new phone's life left
     assert remaining_life(Condition.USED, release_year=2023, as_of=NOV_2026) > life
 
 
